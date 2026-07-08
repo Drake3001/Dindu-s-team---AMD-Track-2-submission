@@ -4,8 +4,9 @@ from pathlib import Path
 import structlog
 
 from file_io.download import download_video
+from file_io.drive_upload import upload_outputs
 from file_io.input import read_input
-from file_io.output import write_output
+from file_io.output import resolve_output_dir, write_output
 
 
 def configure_logging() -> None:
@@ -29,6 +30,18 @@ def load_input(file_path: str | Path) -> list[dict]:
     return read_input(file_path)
 
 
-def save_output(data: list[dict], output_dir: str | Path = "output") -> Path:
-    """Save processed data to a timestamped JSON output file."""
-    return write_output(data, output_dir)
+def save_output(
+    data: list[dict],
+    output_dir: str | Path = "output",
+    filename_prefix: str = "results",
+) -> Path:
+    """Save processed data to a timestamped JSON output file in the given directory."""
+    return write_output(data, output_dir, filename_prefix=filename_prefix)
+
+
+def upload_to_drive(
+    output_dir: str | Path = "output",
+    subfolder_name: str | None = None,
+) -> list[str]:
+    """Upload JSON output files to Google Drive and remove uploaded local files."""
+    return upload_outputs(output_dir, subfolder_name=subfolder_name)

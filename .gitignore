@@ -9,6 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment and credentials
+.env
+credentials/
+
 # Generated output
 output/
 videos/
