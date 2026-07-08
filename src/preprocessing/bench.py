@@ -6,17 +6,17 @@ broken down by phase (metadata read / frame sampling / disk save), so you
 can see where the time actually goes.
 
 Usage:
-    uv run python -m preprocessing.bench --task-id v1 --video clip1.mp4
-    uv run python -m preprocessing.bench --task-id v1 --video clip1.mp4 --runs 5 --no-save
-    uv run python -m preprocessing.bench --task-id v1 --video clip1.mp4 --strategy uniform --max-frames 8
+    uv run bench --task_id v1 --video clip1.mp4
+    uv run bench --task_id v1 --video clip1.mp4 --runs 5 --save=False
+    uv run bench --task_id v1 --video clip1.mp4 --strategy uniform --max_frames 8
 """
 
 from __future__ import annotations
 
-import argparse
 import time
 from pathlib import Path
 
+import fire
 import structlog
 
 from file_io.api import configure_logging
@@ -38,8 +38,15 @@ from .preprocessing import (
 log = structlog.get_logger(__name__)
 
 
-def run_once(video_path: Path, task_id: str, max_frames: int, max_dim: int,
-             strategy: str, output_dir: Path, save: bool) -> dict:
+def run_once(
+    video_path: Path,
+    task_id: str,
+    max_frames: int,
+    max_dim: int,
+    strategy: str,
+    output_dir: Path,
+    save: bool,
+) -> dict:
     t0 = time.perf_counter()
     metadata = read_metadata(video_path)
     t1 = time.perf_counter()
@@ -65,23 +72,25 @@ def run_once(video_path: Path, task_id: str, max_frames: int, max_dim: int,
     }
 
 
-def main() -> None:
+def main(
+    task_id: str,
+    video: str,
+    video_dir: str = str(DEFAULT_VIDEO_DIR),
+    output_dir: str = str(DEFAULT_OUTPUT_DIR),
+    max_frames: int = DEFAULT_MAX_FRAMES,
+    max_dim: int = DEFAULT_MAX_DIM,
+    strategy: str = "adaptive",
+    runs: int = 3,
+    save: bool = True,
+) -> None:
+    """Benchmark preprocessing timing for a single video."""
     configure_logging()
-    parser = argparse.ArgumentParser(description="Benchmark preprocessing timing for a single video")
-    parser.add_argument("--task-id", required=True)
-    parser.add_argument("--video", required=True, help="filename inside /video, or a full path")
-    parser.add_argument("--video-dir", default=str(DEFAULT_VIDEO_DIR))
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument("--max-frames", type=int, default=DEFAULT_MAX_FRAMES)
-    parser.add_argument("--max-dim", type=int, default=DEFAULT_MAX_DIM)
-    parser.add_argument("--strategy", choices=["uniform", "adaptive"], default="adaptive")
-    parser.add_argument("--runs", type=int, default=3,
-                         help="repeat N times and report avg (run 1 may be slower - cold disk cache)")
-    parser.add_argument("--no-save", action="store_true", help="skip writing frames to disk")
-    args = parser.parse_args()
+
+    if strategy not in {"uniform", "adaptive"}:
+        raise ValueError("strategy must be 'uniform' or 'adaptive'")
 
     try:
-        video_path = resolve_video(args.video, Path(args.video_dir), task_id=args.task_id)
+        video_path = resolve_video(video, Path(video_dir), task_id=task_id)
     except PreprocessingError as e:
         log.error("video_not_found", error=str(e))
         raise SystemExit(1)
@@ -89,29 +98,36 @@ def main() -> None:
     log.info(
         "benchmark_started",
         video=str(video_path),
-        task_id=args.task_id,
-        strategy=args.strategy,
-        max_frames=args.max_frames,
-        max_dim=args.max_dim,
-        runs=args.runs,
+        task_id=task_id,
+        strategy=strategy,
+        max_frames=max_frames,
+        max_dim=max_dim,
+        runs=runs,
     )
     results = []
-    for i in range(args.runs):
-        r = run_once(video_path, args.task_id, args.max_frames, args.max_dim,
-                      args.strategy, Path(args.output_dir), not args.no_save)
-        results.append(r)
+    for i in range(runs):
+        result = run_once(
+            video_path,
+            task_id,
+            max_frames,
+            max_dim,
+            strategy,
+            Path(output_dir),
+            save,
+        )
+        results.append(result)
         log.info(
             "benchmark_run",
             run=i + 1,
-            runs=args.runs,
-            total_s=round(r["total_s"], 3),
-            metadata_read_s=round(r["metadata_read_s"], 3),
-            sampling_s=round(r["sampling_s"], 3),
-            save_s=round(r["save_s"], 3),
-            num_frames=r["num_frames"],
-            frame_budget=r["frame_budget"],
-            duration_sec=round(r["duration_sec"], 1),
-            resolution=r["resolution"],
+            runs=runs,
+            total_s=round(result["total_s"], 3),
+            metadata_read_s=round(result["metadata_read_s"], 3),
+            sampling_s=round(result["sampling_s"], 3),
+            save_s=round(result["save_s"], 3),
+            num_frames=result["num_frames"],
+            frame_budget=result["frame_budget"],
+            duration_sec=round(result["duration_sec"], 1),
+            resolution=result["resolution"],
         )
 
     if len(results) > 1:
@@ -121,9 +137,13 @@ def main() -> None:
             "benchmark_summary",
             avg_total_s=round(avg_total, 3),
             avg_sampling_s=round(avg_sampling, 3),
-            runs=args.runs,
+            runs=runs,
         )
 
 
+def cli() -> None:
+    fire.Fire(main)
+
+
 if __name__ == "__main__":
-    main()
+    cli()
