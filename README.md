@@ -17,34 +17,52 @@ configure_logging()
 output_path = save_output(tasks, output_dir="output")
 ```
 
-## Google Drive Upload
+## Google Drive Upload (OAuth)
 
-Upload JSON files from a local output directory to Google Drive. After each successful upload, the local file is deleted to avoid duplicate uploads.
+Upload JSON files from a local output directory to your personal Google Drive folder. After each successful upload, the local file is deleted to avoid duplicate uploads.
 
-### 1. Create a service account
+### 1. Enable Google Drive API
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/).
 2. Create or select a project and enable the **Google Drive API**.
-3. Create a **Service Account** and download its JSON key.
-4. Save the key locally, e.g. `credentials/service-account.json`.
+3. Configure the **OAuth consent screen** (External is fine for personal use; add your email as a test user if the app is in Testing mode).
+4. Create an **OAuth client ID** of type **Desktop app**.
+5. Download the JSON and save it as `credentials/oauth-client.json`.
 
-### 2. Share the target Drive folder
+### 2. Configure `credentials/.env`
 
-1. Open your Google Drive folder.
-2. Share it with the service account email (from the JSON file, e.g. `...@....iam.gserviceaccount.com`) as **Editor**.
-
-### 3. Configure `.env`
-
-Copy `.env.example` to `.env` and set:
+Copy `credentials/.env.example` to `credentials/.env` and set:
 
 ```env
 GOOGLE_DRIVE=https://drive.google.com/drive/folders/YOUR_FOLDER_ID
-GDRIVE_SERVICE_ACCOUNT_FILE=credentials/service-account.json
+GDRIVE_OAUTH_CLIENT_FILE=credentials/oauth-client.json
+GDRIVE_OAUTH_TOKEN_FILE=credentials/token.json
 ```
 
 `GOOGLE_DRIVE` accepts either a shared folder URL or a raw folder ID. You can also use `GDRIVE_FOLDER_ID` instead.
 
-### 4. Upload outputs
+### 3. Authorize once
+
+```bash
+uv run upload-drive login
+```
+
+This opens a browser so you can sign in with your Google account and grant Drive access. The token is saved locally to `credentials/token.json`.
+
+### 4. Validate
+
+```bash
+uv run upload-drive check
+```
+
+### 5. Upload outputs
+
+```bash
+uv run upload-drive upload --output_dir output
+uv run upload-drive upload --output_dir output --subfolder_name run_2026_07_09
+```
+
+Or from Python:
 
 ```python
 from file_io.api import configure_logging, save_output, upload_to_drive

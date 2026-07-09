@@ -11,7 +11,9 @@ wheels/
 
 # Environment and credentials
 .env
-credentials/
+credentials/**
+!credentials/
+!credentials/.env.example
 
 # Generated output
 output/
