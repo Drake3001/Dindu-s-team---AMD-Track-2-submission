@@ -5,5 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fire>=0.7.0",
+    "google-api-python-client>=2.0.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "python-dotenv>=1.0.0",
     "structlog>=24.0.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+upload-drive = "file_io.upload_cli:cli"
