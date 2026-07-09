@@ -17,6 +17,31 @@ configure_logging()
 output_path = save_output(tasks, output_dir="output")
 ```
 
+## Model Client
+
+Call OpenAI-compatible chat completion APIs through OpenRouter or Fireworks:
+
+```env
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=YOUR_OPENROUTER_API_KEY
+OPENROUTER_MODEL=YOUR_OPENROUTER_MODEL
+
+FIREWORKS_API_KEY=YOUR_FIREWORKS_API_KEY
+FIREWORKS_MODEL=YOUR_FIREWORKS_MODEL
+MODEL_TIMEOUT_SECONDS=60
+MODEL_TEMPERATURE=0.7
+MODEL_MAX_TOKENS=512
+```
+
+```python
+from model_client import generate_text
+
+text = generate_text(
+    "You write concise captions for videos.",
+    "Write one formal caption for a product demo clip.",
+)
+```
+
 ## Google Drive Upload (OAuth)
 
 Upload JSON files from a local output directory to your personal Google Drive folder. After each successful upload, the local file is deleted to avoid duplicate uploads.
