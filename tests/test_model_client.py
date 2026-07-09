@@ -1,5 +1,6 @@
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from model_client import generate_text
@@ -20,12 +21,11 @@ class ModelClientConfigTests(unittest.TestCase):
 
 
 class ModelClientRequestTests(unittest.TestCase):
-    @patch("model_client.client.requests.post")
-    def test_openrouter_chat_request(self, post: Mock) -> None:
-        post.return_value.status_code = 200
-        post.return_value.json.return_value = {
-            "choices": [{"message": {"content": "hello"}}]
-        }
+    @patch("model_client.api.OpenAI")
+    def test_openrouter_chat_request(self, openai_class: Mock) -> None:
+        sdk_client = openai_class.return_value
+        sdk_client.with_options.return_value = sdk_client
+        sdk_client.chat.completions.create.return_value = _completion("hello")
 
         client = create_model_client(
             provider="openrouter",
@@ -38,23 +38,25 @@ class ModelClientRequestTests(unittest.TestCase):
         result = client.chat([{"role": "user", "content": "Hi"}])
 
         self.assertEqual(result, "hello")
-        post.assert_called_once()
-        _, kwargs = post.call_args
-        self.assertEqual(
-            post.call_args.args[0],
-            "https://openrouter.ai/api/v1/chat/completions",
+        openai_class.assert_called_once_with(
+            api_key="secret",
+            base_url="https://openrouter.ai/api/v1",
+            timeout=60.0,
         )
-        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer secret")
-        self.assertEqual(kwargs["json"]["model"], "openai/test")
-        self.assertEqual(kwargs["json"]["temperature"], 0.2)
-        self.assertEqual(kwargs["json"]["max_tokens"], 123)
+        sdk_client.with_options.assert_called_once_with(timeout=60.0)
+        sdk_client.chat.completions.create.assert_called_once_with(
+            model="openai/test",
+            messages=[{"role": "user", "content": "Hi"}],
+            temperature=0.2,
+            max_tokens=123,
+            stream=False,
+        )
 
-    @patch("model_client.client.requests.post")
-    def test_fireworks_generate_text_request(self, post: Mock) -> None:
-        post.return_value.status_code = 200
-        post.return_value.json.return_value = {
-            "choices": [{"message": {"content": "done"}}]
-        }
+    @patch("model_client.api.OpenAI")
+    def test_fireworks_generate_text_request(self, openai_class: Mock) -> None:
+        sdk_client = openai_class.return_value
+        sdk_client.with_options.return_value = sdk_client
+        sdk_client.chat.completions.create.return_value = _completion("done")
 
         result = generate_text(
             "System",
@@ -65,17 +67,29 @@ class ModelClientRequestTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "done")
-        self.assertEqual(
-            post.call_args.args[0],
-            "https://api.fireworks.ai/inference/v1/chat/completions",
+        openai_class.assert_called_once_with(
+            api_key="secret",
+            base_url="https://api.fireworks.ai/inference/v1",
+            timeout=60.0,
         )
-        self.assertEqual(
-            post.call_args.kwargs["json"]["messages"],
-            [
+        sdk_client.chat.completions.create.assert_called_once_with(
+            model="accounts/fireworks/models/test",
+            messages=[
                 {"role": "system", "content": "System"},
                 {"role": "user", "content": "User"},
             ],
+            temperature=0.7,
+            max_tokens=512,
+            stream=False,
         )
+
+
+def _completion(content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(message=SimpleNamespace(content=content)),
+        ],
+    )
 
 
 if __name__ == "__main__":

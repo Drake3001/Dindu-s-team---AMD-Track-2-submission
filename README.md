@@ -19,7 +19,7 @@ output_path = save_output(tasks, output_dir="output")
 
 ## Model Client
 
-Call OpenAI-compatible chat completion APIs through OpenRouter or Fireworks:
+Call OpenAI-compatible chat completion APIs through OpenRouter or Fireworks using the official `openai` Python SDK:
 
 ```env
 MODEL_PROVIDER=openrouter
