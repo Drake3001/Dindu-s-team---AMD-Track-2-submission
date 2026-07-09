@@ -183,6 +183,9 @@ def main(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     user_prompt: str = DEFAULT_USER_PROMPT,
     include_responses: bool = False,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    timeout_seconds: float | None = None,
 ) -> None:
     """Benchmark preprocessing plus model calls for all tasks in a JSON file."""
     configure_logging()
@@ -194,7 +197,11 @@ def main(
     videos_path = Path(videos_dir)
     out_path = Path(output_dir)
     task_list = load_input(tasks_path)
-    model_client = create_model_client()
+    model_client = create_model_client(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
+    )
 
     params = {
         "tasks": str(tasks_path),
@@ -211,6 +218,9 @@ def main(
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "include_responses": include_responses,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout_seconds": timeout_seconds,
     }
 
     log.info("model_benchmark_started", **params, num_tasks=len(task_list))
