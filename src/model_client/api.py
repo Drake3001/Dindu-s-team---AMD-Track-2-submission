@@ -7,6 +7,12 @@ from model_client.config import ModelConfig, load_model_config
 
 log = structlog.get_logger(__name__)
 
+DEFAULT_IMAGE_MIME_TYPE = "image/jpeg"
+FRAME_GRID_PROMPT_PREFIX = (
+    "The attached image is a grid of video frames ordered left-to-right, "
+    "top-to-bottom. Analyze it as a temporal sequence.\n\n"
+)
+
 
 class ModelRequestError(RuntimeError):
     """Raised when a model API request fails."""
@@ -94,6 +100,75 @@ class ModelClient:
             timeout_seconds=timeout_seconds,
         )
 
+    def generate_from_image_base64(
+        self,
+        image_base64: str,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from a prompt and one base64-encoded image."""
+        return self.generate_from_images_base64(
+            [image_base64],
+            system_prompt,
+            user_prompt,
+            image_mime_type=image_mime_type,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def generate_from_images_base64(
+        self,
+        images_base64: list[str],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from a prompt and one or more base64-encoded images."""
+        messages = _build_image_messages(
+            images_base64,
+            system_prompt,
+            user_prompt,
+            image_mime_type=image_mime_type,
+        )
+        return self.chat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def generate_from_frame_grid_base64(
+        self,
+        frame_grid_base64: str,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from one base64 image containing a grid of video frames."""
+        return self.generate_from_image_base64(
+            frame_grid_base64,
+            system_prompt,
+            f"{FRAME_GRID_PROMPT_PREFIX}{user_prompt}",
+            image_mime_type=image_mime_type,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
 
 def create_model_client(
     provider: str | None = None,
@@ -164,6 +239,140 @@ def generate_text(
         max_tokens=max_tokens,
     )
     return client.generate_text(system_prompt, user_prompt)
+
+
+def generate_from_image_base64(
+    image_base64: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Generate text from a prompt and one base64-encoded image."""
+    client = create_model_client(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return client.generate_from_image_base64(
+        image_base64,
+        system_prompt,
+        user_prompt,
+        image_mime_type=image_mime_type,
+    )
+
+
+def generate_from_images_base64(
+    images_base64: list[str],
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Generate text from a prompt and one or more base64-encoded images."""
+    client = create_model_client(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return client.generate_from_images_base64(
+        images_base64,
+        system_prompt,
+        user_prompt,
+        image_mime_type=image_mime_type,
+    )
+
+
+def generate_from_frame_grid_base64(
+    frame_grid_base64: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Generate text from one base64 image containing a grid of video frames."""
+    client = create_model_client(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return client.generate_from_frame_grid_base64(
+        frame_grid_base64,
+        system_prompt,
+        user_prompt,
+        image_mime_type=image_mime_type,
+    )
+
+
+def _build_image_messages(
+    images_base64: list[str],
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+) -> list[dict[str, Any]]:
+    if not images_base64:
+        raise ModelRequestError("images_base64 must contain at least one image")
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for image_base64 in images_base64:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _normalize_image_data_url(image_base64, image_mime_type),
+                },
+            }
+        )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": content},
+    ]
+
+
+def _normalize_image_data_url(image_base64: str, image_mime_type: str) -> str:
+    value = image_base64.strip()
+    if not value:
+        raise ModelRequestError("image base64 value cannot be empty")
+
+    if value.startswith("data:"):
+        return value
+
+    return f"data:{image_mime_type};base64,{value}"
 
 
 def _extract_message_content(response: Any) -> str:

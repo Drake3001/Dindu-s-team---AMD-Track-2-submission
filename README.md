@@ -42,6 +42,30 @@ text = generate_text(
 )
 ```
 
+For VLM models, pass base64 images as raw base64 strings or full data URLs:
+
+```python
+from model_client import generate_from_images_base64
+
+text = generate_from_images_base64(
+    ["BASE64_FRAME_1", "data:image/jpeg;base64,BASE64_FRAME_2"],
+    "You analyze video frames.",
+    "Describe what happens across these frames.",
+)
+```
+
+For one image containing a grid of video frames:
+
+```python
+from model_client import generate_from_frame_grid_base64
+
+text = generate_from_frame_grid_base64(
+    "BASE64_FRAME_GRID",
+    "You analyze video frame grids.",
+    "Describe the video sequence.",
+)
+```
+
 ## Google Drive Upload (OAuth)
 
 Upload JSON files from a local output directory to your personal Google Drive folder. After each successful upload, the local file is deleted to avoid duplicate uploads.
