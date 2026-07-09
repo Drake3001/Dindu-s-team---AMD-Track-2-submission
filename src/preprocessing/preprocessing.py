@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import cv2
+import numpy as np
 import structlog
 
 from .pruning_strat import AbsDiffPruner, FramePruner
@@ -31,11 +32,6 @@ DEFAULT_TARGET_FPS = 1.0
 DEFAULT_PRUNE_THRESHOLD = 5.0
 DEFAULT_GRID_COLS = 4
 DEFAULT_GRID_ROWS = 4
-
-
-class PreprocessingError(Exception):
-    """Raised for any unrecoverable failure in the preprocessing stage."""
-
 
 from .types import Frame, PreprocessingError, VideoMetadata
 
@@ -125,14 +121,22 @@ def sample_and_downscale(
         raise PreprocessingError(f"Could not open video for sampling: {video_path}")
 
     frames: list[Frame] = []
-    idx = 0
     try:
-        while True:
-            ok, img = cap.read()
-            if not ok or img is None:
-                break
-            if idx % step == 0:
-                ts = idx / native_fps
+        if step > 15 and metadata.frame_count > 0:
+            target_indices = []
+            curr_idx = 0
+            while curr_idx < metadata.frame_count:
+                target_indices.append(curr_idx)
+                curr_idx += step
+                if max_frames is not None and len(target_indices) >= max_frames:
+                    break
+
+            for target_idx in target_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_idx)
+                ok, img = cap.read()
+                if not ok or img is None:
+                    break
+                ts = target_idx / native_fps
                 frames.append(
                     Frame(
                         index=len(frames),
@@ -140,9 +144,24 @@ def sample_and_downscale(
                         image=_resize_max_dim(img, max_dim),
                     )
                 )
-                if max_frames is not None and len(frames) >= max_frames:
+        else:
+            idx = 0
+            while True:
+                ok, img = cap.read()
+                if not ok or img is None:
                     break
-            idx += 1
+                if idx % step == 0:
+                    ts = idx / native_fps
+                    frames.append(
+                        Frame(
+                            index=len(frames),
+                            timestamp=ts,
+                            image=_resize_max_dim(img, max_dim),
+                        )
+                    )
+                    if max_frames is not None and len(frames) >= max_frames:
+                        break
+                idx += 1
     finally:
         cap.release()
 
