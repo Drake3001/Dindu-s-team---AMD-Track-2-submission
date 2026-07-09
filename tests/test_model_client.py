@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 from model_client import generate_from_frame_grid_base64, generate_text
 from model_client.api import create_model_client
 from model_client.config import ModelConfigError, load_model_config
+from model_client.messages import build_frame_grid_messages, build_image_messages
+from model_client.types import ModelRequestError
 
 
 class ModelClientConfigTests(unittest.TestCase):
@@ -21,7 +23,7 @@ class ModelClientConfigTests(unittest.TestCase):
 
 
 class ModelClientRequestTests(unittest.TestCase):
-    @patch("model_client.api.OpenAI")
+    @patch("model_client.client.OpenAI")
     def test_openrouter_chat_request(self, openai_class: Mock) -> None:
         sdk_client = openai_class.return_value
         sdk_client.with_options.return_value = sdk_client
@@ -52,7 +54,7 @@ class ModelClientRequestTests(unittest.TestCase):
             stream=False,
         )
 
-    @patch("model_client.api.OpenAI")
+    @patch("model_client.client.OpenAI")
     def test_fireworks_generate_text_request(self, openai_class: Mock) -> None:
         sdk_client = openai_class.return_value
         sdk_client.with_options.return_value = sdk_client
@@ -83,7 +85,7 @@ class ModelClientRequestTests(unittest.TestCase):
             stream=False,
         )
 
-    @patch("model_client.api.OpenAI")
+    @patch("model_client.client.OpenAI")
     def test_generate_from_images_base64_builds_multimodal_messages(
         self,
         openai_class: Mock,
@@ -134,7 +136,7 @@ class ModelClientRequestTests(unittest.TestCase):
             stream=False,
         )
 
-    @patch("model_client.api.OpenAI")
+    @patch("model_client.client.OpenAI")
     def test_generate_from_frame_grid_base64_adds_grid_instruction(
         self,
         openai_class: Mock,
@@ -161,6 +163,31 @@ class ModelClientRequestTests(unittest.TestCase):
             content[1]["image_url"]["url"],
             "data:image/jpeg;base64,gridbase64",
         )
+
+
+class ModelClientMessageTests(unittest.TestCase):
+    def test_build_image_messages_normalizes_raw_base64(self) -> None:
+        messages = build_image_messages(
+            ["abc123", "data:image/png;base64,xyz789"],
+            "System",
+            "Describe.",
+            image_mime_type="image/png",
+        )
+
+        content = messages[1]["content"]
+        self.assertEqual(content[1]["image_url"]["url"], "data:image/png;base64,abc123")
+        self.assertEqual(content[2]["image_url"]["url"], "data:image/png;base64,xyz789")
+
+    def test_build_image_messages_rejects_empty_images(self) -> None:
+        with self.assertRaisesRegex(ModelRequestError, "images_base64"):
+            build_image_messages([], "System", "Describe.")
+
+    def test_build_frame_grid_messages_adds_temporal_instruction(self) -> None:
+        messages = build_frame_grid_messages("gridbase64", "System", "Describe.")
+        content = messages[1]["content"]
+
+        self.assertIn("grid of video frames", content[0]["text"])
+        self.assertIn("Describe.", content[0]["text"])
 
 
 def _completion(content: str) -> SimpleNamespace:
