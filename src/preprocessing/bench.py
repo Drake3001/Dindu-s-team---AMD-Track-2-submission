@@ -119,7 +119,7 @@ def process_task(
         },
         "counts": {
             "sampled": result.sampled_count,
-            "pruned": result.pruned_count,
+            "post_pruned": result.post_pruned_count,
             "grids": len(result.grids_b64),
         },
         "timings_s": {
@@ -206,7 +206,7 @@ def main(
                     task_id=result["task_id"],
                     total_s=result["timings_s"]["total"],
                     sampled=result["counts"]["sampled"],
-                    pruned=result["counts"]["pruned"],
+                    post_pruned=result["counts"]["post_pruned"],
                     grids=result["counts"]["grids"],
                 )
 

@@ -46,7 +46,7 @@ class PreprocessResult:
     source: str
     metadata: VideoMetadata
     sampled_count: int
-    pruned_count: int
+    post_pruned_count: int
     grids_b64: List[str]
     frame_timestamps: List[float]
 
@@ -193,13 +193,13 @@ def preprocess_video(
     sampled_count = len(sampled)
 
     pruner = pruner or AbsDiffPruner(threshold=prune_threshold)
-    pruned = pruner.prune(sampled)
+    post_pruned = pruner.prune(sampled)
     sampled.clear()
-    pruned_count = len(pruned)
+    post_pruned_count = len(post_pruned)
 
-    grids_b64 = frames_to_grid_b64(pruned, cols=grid_cols, rows=grid_rows)
-    timestamps = [f.timestamp for f in pruned]
-    pruned.clear()
+    grids_b64 = frames_to_grid_b64(post_pruned, cols=grid_cols, rows=grid_rows)
+    timestamps = [f.timestamp for f in post_pruned]
+    post_pruned.clear()
     gc.collect()
 
     log.info(
@@ -207,7 +207,7 @@ def preprocess_video(
         task_id=task_id,
         duration_sec=metadata.duration_sec,
         sampled_count=sampled_count,
-        pruned_count=pruned_count,
+        post_pruned_count=post_pruned_count,
         num_grids=len(grids_b64),
     )
 
@@ -216,7 +216,7 @@ def preprocess_video(
         source=str(video_path),
         metadata=metadata,
         sampled_count=sampled_count,
-        pruned_count=pruned_count,
+        post_pruned_count=post_pruned_count,
         grids_b64=grids_b64,
         frame_timestamps=timestamps,
     )
@@ -232,7 +232,7 @@ if __name__ == "__main__":
     try:
         res = preprocess_video(tid, Path(path))
         print(
-            f"{tid}: {res.pruned_count} frames -> {len(res.grids_b64)} grids, "
+            f"{tid}: {res.post_pruned_count} frames -> {len(res.grids_b64)} grids, "
             f"duration={res.metadata.duration_sec:.1f}s, "
             f"size={res.metadata.width}x{res.metadata.height}"
         )

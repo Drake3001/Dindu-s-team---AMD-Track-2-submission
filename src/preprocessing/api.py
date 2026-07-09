@@ -37,7 +37,7 @@ class PreprocessedVideo:
     width: int
     height: int
     sampled_count: int
-    pruned_count: int
+    post_pruned_count: int
     num_grids: int
     grids_b64: List[str]        # base64 JPEG grids, ready to hand to a VLM
     frame_timestamps: List[float]
@@ -77,7 +77,7 @@ def preprocess(
         width=result.metadata.width,
         height=result.metadata.height,
         sampled_count=result.sampled_count,
-        pruned_count=result.pruned_count,
+        post_pruned_count=result.post_pruned_count,
         num_grids=len(result.grids_b64),
         grids_b64=result.grids_b64,
         frame_timestamps=result.frame_timestamps,
