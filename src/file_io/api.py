@@ -3,7 +3,7 @@ from pathlib import Path
 
 import structlog
 
-from file_io.download import download_video
+from file_io.download import download_for_task, download_video, expected_video_path
 from file_io.drive_upload import upload_outputs
 from file_io.input import read_input
 from file_io.output import resolve_output_dir, write_output
