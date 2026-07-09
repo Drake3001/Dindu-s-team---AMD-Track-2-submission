@@ -17,6 +17,55 @@ configure_logging()
 output_path = save_output(tasks, output_dir="output")
 ```
 
+## Model Client
+
+Call OpenAI-compatible chat completion APIs through OpenRouter or Fireworks using the official `openai` Python SDK:
+
+```env
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=YOUR_OPENROUTER_API_KEY
+OPENROUTER_MODEL=YOUR_OPENROUTER_MODEL
+
+FIREWORKS_API_KEY=YOUR_FIREWORKS_API_KEY
+FIREWORKS_MODEL=YOUR_FIREWORKS_MODEL
+MODEL_TIMEOUT_SECONDS=60
+MODEL_TEMPERATURE=0.7
+MODEL_MAX_TOKENS=512
+```
+
+```python
+from model_client import generate_text
+
+text = generate_text(
+    "You write concise captions for videos.",
+    "Write one formal caption for a product demo clip.",
+)
+```
+
+For VLM models, pass base64 images as raw base64 strings or full data URLs:
+
+```python
+from model_client import generate_from_images_base64
+
+text = generate_from_images_base64(
+    ["BASE64_FRAME_1", "data:image/jpeg;base64,BASE64_FRAME_2"],
+    "You analyze video frames.",
+    "Describe what happens across these frames.",
+)
+```
+
+For one image containing a grid of video frames:
+
+```python
+from model_client import generate_from_frame_grid_base64
+
+text = generate_from_frame_grid_base64(
+    "BASE64_FRAME_GRID",
+    "You analyze video frame grids.",
+    "Describe the video sequence.",
+)
+```
+
 ## Google Drive Upload (OAuth)
 
 Upload JSON files from a local output directory to your personal Google Drive folder. After each successful upload, the local file is deleted to avoid duplicate uploads.

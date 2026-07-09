@@ -9,6 +9,7 @@ dependencies = [
     "google-api-python-client>=2.0.0",
     "google-auth>=2.0.0",
     "google-auth-oauthlib>=1.0.0",
+    "openai>=2.45.0",
     "python-dotenv>=1.0.0",
     "structlog>=24.0.0",
     "opencv-python-headless>=4.8.0",
@@ -25,3 +26,4 @@ where = ["src"]
 [project.scripts]
 upload-drive = "file_io.upload_cli:cli"
 bench = "preprocessing.bench:cli"
+bench2 = "model_client.bench:cli"
