@@ -12,17 +12,18 @@ uv sync
 
 ## `bench`
 
-**Purpose:** Benchmark preprocessing timing for a single already-downloaded video. Reports per-phase timings (metadata read, frame sampling, disk save) and optional multi-run averages.
+**Purpose:** Benchmark the preprocessing pipeline for all tasks in `tasks.json`. Optionally downloads videos (renamed to `{task_id}.mp4`), preprocesses each video sequentially, and writes a JSON timing report to `output/processing/`.
 
 **Defined in:** `pyproject.toml` → `[project.scripts]`
 
 **Usage:**
 
 ```bash
-uv run bench --task_id v1 --video clip1.mp4
-uv run bench v1 clip1.mp4
-uv run bench --task_id v1 --video clip1.mp4 --runs 5 --save=False
-uv run bench --task_id v1 --video clip1.mp4 --strategy uniform --max_frames 8
+uv run bench
+uv run bench --tasks input/tasks.json
+uv run bench --skip_download=True
+uv run bench --fps 2 --max_dim 384 --prune_threshold 8 --grid_cols 3 --grid_rows 3
+uv run bench --runs 3
 uv run bench --help
 ```
 
@@ -30,17 +31,19 @@ uv run bench --help
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `task_id` | str | *(required)* | Task identifier (positional or `--task_id`) |
-| `video` | str | *(required)* | Filename inside `videos/`, or a full path |
-| `--video_dir` | str | `videos` | Directory containing downloaded videos |
-| `--output_dir` | str | `preprocessed_input` | Where sampled frames are saved |
-| `--max_frames` | int | `240` | Upper bound on frames to sample |
-| `--max_dim` | int | `512` | Max width/height when resizing frames |
-| `--strategy` | str | `adaptive` | `uniform` or `adaptive` sampling |
-| `--runs` | int | `3` | Repeat benchmark N times and log averages |
-| `--save` | bool | `True` | Write frames to disk; use `--save=False` to skip |
+| `--tasks` | str | `input/tasks.json` | Path to tasks JSON file (always read) |
+| `--videos_dir` | str | `videos` | Directory for downloaded videos |
+| `--output_dir` | str | `output` | Base output directory; reports go to `output/processing/` |
+| `--fps` | float | `1.0` | Target frames per second to sample |
+| `--max_dim` | int | `512` | Max longest edge when resizing frames |
+| `--prune_threshold` | float | `5.0` | Min mean abs-diff to keep a frame (drops near-duplicates) |
+| `--grid_cols` | int | `4` | Columns in each base64 grid montage |
+| `--grid_rows` | int | `4` | Rows in each base64 grid montage |
+| `--max_frames` | int | `240` | Safety cap on sampled frames |
+| `--skip_download` | bool | `False` | Skip download; assume `videos/{task_id}.ext` exists |
+| `--runs` | int | `1` | Repeat full benchmark N times |
 
-**Short flags:** `-v` (`video_dir`), `-o` (`output_dir`), `-r` (`runs`)
+**Output:** `output/processing/bench_YYYYMMDD_HHMMSS.json` with run parameters, per-video metadata, frame/grid counts, and per-phase timings.
 
 ---
 
@@ -62,14 +65,14 @@ uv run python src/main.py
 
 ## `preprocessing.preprocessing`
 
-**Purpose:** Run the full preprocessing pipeline once for a single task — locate video, read metadata, sample frames, and save to disk.
+**Purpose:** Run the full preprocessing pipeline once for a single task — sample+downscale, prune, and build in-memory base64 grids.
 
 **Defined in:** `src/preprocessing/preprocessing.py` (`__main__`)
 
 **Usage:**
 
 ```bash
-uv run python -m preprocessing.preprocessing v1 clip1.mp4
+uv run python -m preprocessing.preprocessing v1 videos/v1.mp4
 ```
 
 **Arguments:**
@@ -77,9 +80,9 @@ uv run python -m preprocessing.preprocessing v1 clip1.mp4
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `task_id` | yes | Task identifier |
-| `video` | yes | Filename inside `videos/` (or path resolvable by the pipeline) |
+| `video_path` | yes | Path to the local video file |
 
-Uses default directories: `videos/` (input), `preprocessed_input/` (output).
+Processed output is held in memory (base64 grids). Use `preprocessing.api.preprocess()` from Python code for the public interface.
 
 ---
 

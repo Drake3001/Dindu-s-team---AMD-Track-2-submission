@@ -1,144 +1,228 @@
 """
 Timing benchmark for the preprocessing pipeline.
 
-Measures how long it takes to preprocess a single already-downloaded video,
-broken down by phase (metadata read / frame sampling / disk save), so you
-can see where the time actually goes.
+Reads tasks from a JSON file, optionally downloads videos renamed to
+task ids, then preprocesses each video sequentially while measuring
+per-phase timings. Writes a JSON report under output/processing/.
 
 Usage:
-    uv run bench --task_id v1 --video clip1.mp4
-    uv run bench --task_id v1 --video clip1.mp4 --runs 5 --save=False
-    uv run bench --task_id v1 --video clip1.mp4 --strategy uniform --max_frames 8
+    uv run bench
+    uv run bench --tasks input/tasks.json --skip_download=True
+    uv run bench --fps 2 --max_dim 384 --prune_threshold 8
 """
 
 from __future__ import annotations
 
+import gc
+import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import fire
 import structlog
 
-from file_io.api import configure_logging
+from file_io.api import configure_logging, load_input
+from file_io.download import download_for_task, expected_video_path
 
 from .preprocessing import (
+    DEFAULT_GRID_COLS,
+    DEFAULT_GRID_ROWS,
     DEFAULT_MAX_DIM,
     DEFAULT_MAX_FRAMES,
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_VIDEO_DIR,
-    PreprocessingError,
-    compute_frame_budget,
-    read_metadata,
-    resolve_video,
-    sample_frames_adaptive,
-    sample_frames_uniform,
-    save_frames,
+    DEFAULT_PRUNE_THRESHOLD,
+    DEFAULT_TARGET_FPS,
+    preprocess_video,
 )
+from .types import PreprocessingError
 
 log = structlog.get_logger(__name__)
 
+DEFAULT_TASKS_PATH = Path("input/tasks.json")
+DEFAULT_VIDEOS_DIR = Path("videos")
+DEFAULT_OUTPUT_DIR = Path("output")
+BENCH_SUBDIR = "processing"
 
-def run_once(
-    video_path: Path,
-    task_id: str,
-    max_frames: int,
+
+def _write_report(output_dir: Path, report: dict) -> Path:
+    bench_dir = output_dir / BENCH_SUBDIR
+    bench_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = bench_dir / f"bench_{timestamp}.json"
+    with report_path.open("w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return report_path
+
+
+def _resolve_video_path(
+    task: dict,
+    videos_dir: Path,
+    skip_download: bool,
+) -> Path:
+    task_id = task["task_id"]
+    video_url = task["video_url"]
+
+    if skip_download:
+        path = expected_video_path(task_id, video_url, videos_dir)
+        if not path.is_file():
+            raise PreprocessingError(f"Expected video not found: {path}")
+        return path
+
+    return download_for_task(task_id, video_url, videos_dir)
+
+
+def process_task(
+    task: dict,
+    videos_dir: Path,
+    skip_download: bool,
+    fps: float,
     max_dim: int,
-    strategy: str,
-    output_dir: Path,
-    save: bool,
+    prune_threshold: float,
+    grid_cols: int,
+    grid_rows: int,
+    max_frames: int | None,
 ) -> dict:
+    task_id = task["task_id"]
     t0 = time.perf_counter()
-    metadata = read_metadata(video_path)
+
+    video_path = _resolve_video_path(task, videos_dir, skip_download)
     t1 = time.perf_counter()
 
-    frame_budget = compute_frame_budget(metadata.duration_sec, max_frames=max_frames)
-    sampler = sample_frames_uniform if strategy == "uniform" else sample_frames_adaptive
-    frames = sampler(video_path, metadata, frame_budget, max_dim)
+    result = preprocess_video(
+        task_id=task_id,
+        video_path=video_path,
+        fps=fps,
+        max_dim=max_dim,
+        prune_threshold=prune_threshold,
+        grid_cols=grid_cols,
+        grid_rows=grid_rows,
+        max_frames=max_frames,
+    )
     t2 = time.perf_counter()
 
-    if save:
-        save_frames(frames, output_dir / task_id, task_id)
+    gc.collect()
     t3 = time.perf_counter()
 
+    meta = result.metadata
     return {
-        "duration_sec": metadata.duration_sec,
-        "resolution": f"{metadata.width}x{metadata.height}",
-        "frame_budget": frame_budget,
-        "num_frames": len(frames),
-        "metadata_read_s": t1 - t0,
-        "sampling_s": t2 - t1,
-        "save_s": t3 - t2,
-        "total_s": t3 - t0,
+        "task_id": task_id,
+        "video_url": task["video_url"],
+        "video_path": str(video_path),
+        "metadata": {
+            "duration_sec": meta.duration_sec,
+            "fps": meta.fps,
+            "frame_count": meta.frame_count,
+            "width": meta.width,
+            "height": meta.height,
+            "resolution": f"{meta.width}x{meta.height}",
+        },
+        "counts": {
+            "sampled": result.sampled_count,
+            "pruned": result.pruned_count,
+            "grids": len(result.grids_b64),
+        },
+        "timings_s": {
+            "resolve_video": round(t1 - t0, 4),
+            "preprocess": round(t2 - t1, 4),
+            "cleanup": round(t3 - t2, 4),
+            "total": round(t3 - t0, 4),
+        },
+        "status": "ok",
     }
 
 
 def main(
-    task_id: str,
-    video: str,
-    video_dir: str = str(DEFAULT_VIDEO_DIR),
+    tasks: str = str(DEFAULT_TASKS_PATH),
+    videos_dir: str = str(DEFAULT_VIDEOS_DIR),
     output_dir: str = str(DEFAULT_OUTPUT_DIR),
-    max_frames: int = DEFAULT_MAX_FRAMES,
+    fps: float = DEFAULT_TARGET_FPS,
     max_dim: int = DEFAULT_MAX_DIM,
-    strategy: str = "adaptive",
-    runs: int = 3,
-    save: bool = True,
+    prune_threshold: float = DEFAULT_PRUNE_THRESHOLD,
+    grid_cols: int = DEFAULT_GRID_COLS,
+    grid_rows: int = DEFAULT_GRID_ROWS,
+    max_frames: int | None = DEFAULT_MAX_FRAMES,
+    skip_download: bool = False,
+    runs: int = 1,
 ) -> None:
-    """Benchmark preprocessing timing for a single video."""
+    """Benchmark preprocessing for all tasks in a JSON file."""
     configure_logging()
 
-    if strategy not in {"uniform", "adaptive"}:
-        raise ValueError("strategy must be 'uniform' or 'adaptive'")
+    if runs < 1:
+        raise ValueError("runs must be >= 1")
 
-    try:
-        video_path = resolve_video(video, Path(video_dir), task_id=task_id)
-    except PreprocessingError as e:
-        log.error("video_not_found", error=str(e))
-        raise SystemExit(1)
+    tasks_path = Path(tasks)
+    videos_path = Path(videos_dir)
+    out_path = Path(output_dir)
 
-    log.info(
-        "benchmark_started",
-        video=str(video_path),
-        task_id=task_id,
-        strategy=strategy,
-        max_frames=max_frames,
-        max_dim=max_dim,
-        runs=runs,
-    )
-    results = []
-    for i in range(runs):
-        result = run_once(
-            video_path,
-            task_id,
-            max_frames,
-            max_dim,
-            strategy,
-            Path(output_dir),
-            save,
-        )
-        results.append(result)
-        log.info(
-            "benchmark_run",
-            run=i + 1,
-            runs=runs,
-            total_s=round(result["total_s"], 3),
-            metadata_read_s=round(result["metadata_read_s"], 3),
-            sampling_s=round(result["sampling_s"], 3),
-            save_s=round(result["save_s"], 3),
-            num_frames=result["num_frames"],
-            frame_budget=result["frame_budget"],
-            duration_sec=round(result["duration_sec"], 1),
-            resolution=result["resolution"],
-        )
+    task_list = load_input(tasks_path)
+    params = {
+        "tasks": str(tasks_path),
+        "videos_dir": str(videos_path),
+        "output_dir": str(out_path),
+        "fps": fps,
+        "max_dim": max_dim,
+        "prune_threshold": prune_threshold,
+        "grid_cols": grid_cols,
+        "grid_rows": grid_rows,
+        "max_frames": max_frames,
+        "skip_download": skip_download,
+        "runs": runs,
+    }
 
-    if len(results) > 1:
-        avg_total = sum(r["total_s"] for r in results) / len(results)
-        avg_sampling = sum(r["sampling_s"] for r in results) / len(results)
-        log.info(
-            "benchmark_summary",
-            avg_total_s=round(avg_total, 3),
-            avg_sampling_s=round(avg_sampling, 3),
-            runs=runs,
-        )
+    log.info("benchmark_started", **params, num_tasks=len(task_list))
+
+    all_runs: list[dict] = []
+    for run_idx in range(runs):
+        run_results: list[dict] = []
+        for task in task_list:
+            try:
+                result = process_task(
+                    task,
+                    videos_path,
+                    skip_download,
+                    fps,
+                    max_dim,
+                    prune_threshold,
+                    grid_cols,
+                    grid_rows,
+                    max_frames,
+                )
+            except (PreprocessingError, KeyError, FileNotFoundError) as exc:
+                result = {
+                    "task_id": task.get("task_id", "unknown"),
+                    "video_url": task.get("video_url"),
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                log.error("task_failed", task_id=result["task_id"], error=str(exc))
+
+            run_results.append(result)
+            if result.get("status") == "ok":
+                log.info(
+                    "task_complete",
+                    run=run_idx + 1,
+                    runs=runs,
+                    task_id=result["task_id"],
+                    total_s=result["timings_s"]["total"],
+                    sampled=result["counts"]["sampled"],
+                    pruned=result["counts"]["pruned"],
+                    grids=result["counts"]["grids"],
+                )
+
+        all_runs.append({"run": run_idx + 1, "tasks": run_results})
+
+    report = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "params": params,
+        "runs": all_runs,
+    }
+
+    if runs == 1:
+        report["tasks"] = all_runs[0]["tasks"]
+
+    report_path = _write_report(out_path, report)
+    log.info("benchmark_report_written", path=str(report_path))
 
 
 def cli() -> None:

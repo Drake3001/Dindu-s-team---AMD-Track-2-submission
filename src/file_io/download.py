@@ -7,6 +7,32 @@ import structlog
 log = structlog.get_logger(__name__)
 
 CHUNK_SIZE = 1024 * 1024
+DEFAULT_VIDEO_EXT = ".mp4"
+
+
+def _extension_from_url(url: str) -> str:
+    """Derive a file extension from a video URL, defaulting to .mp4."""
+    suffix = Path(urlparse(url).path).suffix.lower()
+    return suffix if suffix else DEFAULT_VIDEO_EXT
+
+
+def expected_video_path(
+    task_id: str,
+    url: str,
+    videos_dir: str | Path = "videos",
+) -> Path:
+    """Return the expected local path for a task's downloaded video."""
+    return Path(videos_dir) / f"{task_id}{_extension_from_url(url)}"
+
+
+def download_for_task(
+    task_id: str,
+    url: str,
+    videos_dir: str | Path = "videos",
+) -> Path:
+    """Download a task video and save it as videos/{task_id}{ext}."""
+    filename = f"{task_id}{_extension_from_url(url)}"
+    return download_video(url, videos_dir=videos_dir, filename=filename)
 
 
 def download_video(
