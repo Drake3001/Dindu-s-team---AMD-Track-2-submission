@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from model_client.config import ModelConfig
 from model_client.prompts import Prompt
 from workflow.async_pipeline import PipelineConfig, run_bench_tasks, run_workflow_tasks
 
@@ -11,12 +10,14 @@ TEST_PROMPT = Prompt(name="test", system="System", user="User")
 
 
 class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
+    @patch("workflow.async_pipeline.async_generate_caption")
     @patch("workflow.async_pipeline._preprocess_video")
     @patch("workflow.async_pipeline._download_video")
     async def test_run_workflow_tasks_preserves_task_order(
         self,
         download_video: AsyncMock,
         preprocess_video: AsyncMock,
+        async_generate_caption: AsyncMock,
     ) -> None:
         download_video.side_effect = [
             "videos/v1.mp4",
@@ -26,10 +27,11 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
             _preprocessed_payload("v1"),
             _preprocessed_payload("v2"),
         ]
+        async_generate_caption.side_effect = ["caption-a", "caption-b"]
 
-        model_client = AsyncMock()
-        model_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
-        model_client.generate_text = AsyncMock(side_effect=["caption-a", "caption-b"])
+        vlm_client = AsyncMock()
+        vlm_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
+        caption_client = AsyncMock()
 
         tasks = [
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4", "styles": ["formal"]},
@@ -39,7 +41,8 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         with patch("workflow.async_pipeline.ProcessPoolExecutor", return_value=MagicMock()):
             results = await run_workflow_tasks(
                 tasks,
-                model_client=model_client,
+                vlm_client=vlm_client,
+                caption_client=caption_client,
                 analysis_prompt=TEST_PROMPT,
                 videos_dir=Path("videos"),
                 styles_resolver=lambda task: task["styles"],
@@ -49,6 +52,10 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([result["task_id"] for result in results], ["v1", "v2"])
         self.assertEqual(results[0]["captions"]["formal"], "caption-a")
         self.assertEqual(results[1]["captions"]["formal"], "caption-b")
+        vlm_client.generate_from_frame_grids.assert_awaited()
+        self.assertEqual(async_generate_caption.await_count, 2)
+        for call in async_generate_caption.await_args_list:
+            self.assertIs(call.args[0], caption_client)
 
     @patch("workflow.async_pipeline.run_bench_task")
     async def test_run_bench_tasks_runs_all_tasks(
@@ -80,8 +87,13 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(run_bench_task.await_count, 2)
 
-    async def test_tasks_overlap_across_stages(self) -> None:
+    @patch("workflow.async_pipeline.async_generate_caption", new_callable=AsyncMock)
+    async def test_tasks_overlap_across_stages(
+        self,
+        async_generate_caption: AsyncMock,
+    ) -> None:
         events: list[str] = []
+        async_generate_caption.return_value = "caption"
 
         async def fake_download(task, *_args, **_kwargs):
             task_id = task["task_id"]
@@ -99,9 +111,9 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
             events.append(f"preprocess_end:{task_id}")
             return _preprocessed_payload(task_id)
 
-        model_client = AsyncMock()
-        model_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
-        model_client.generate_text = AsyncMock(return_value="caption")
+        vlm_client = AsyncMock()
+        vlm_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
+        caption_client = AsyncMock()
 
         tasks = [
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4", "styles": ["formal"]},
@@ -115,7 +127,8 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         ):
             await run_workflow_tasks(
                 tasks,
-                model_client=model_client,
+                vlm_client=vlm_client,
+                caption_client=caption_client,
                 analysis_prompt=TEST_PROMPT,
                 videos_dir=Path("videos"),
                 styles_resolver=lambda task: task["styles"],
@@ -131,6 +144,8 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
             download_v1_end,
             "v2 should begin preprocessing before v1 finishes downloading",
         )
+        vlm_client.generate_from_frame_grids.assert_awaited()
+        caption_client.generate_from_frame_grids.assert_not_awaited()
 
 
 def _preprocessed_payload(task_id: str) -> dict:

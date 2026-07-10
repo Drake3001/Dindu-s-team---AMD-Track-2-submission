@@ -1,0 +1,39 @@
+input:
+  tasks: input/tasks.json
+  videos_dir: videos
+  skip_download: false
+
+output:
+  path: output/results.json
+
+pipeline:
+  fps: 1.0
+  max_dim: 512
+  prune_threshold: 5.0
+  grid_cols: 4
+  grid_rows: 4
+  max_frames: 240
+  concurrency:
+    max_download_workers: 2
+    max_preprocess_workers: null
+    max_inference_workers: 3
+
+vlm:
+  provider: openrouter
+  model: null
+  temperature: 0.0
+  max_tokens: 1024
+  timeout_seconds: 60
+  prompt: detailed_chronological
+
+captions:
+  provider: openrouter
+  model: null
+  temperature: null
+  max_tokens: 512
+  timeout_seconds: 60
+  styles:
+    - formal
+    - sarcastic
+    - humorous_tech
+    - humorous_non_tech

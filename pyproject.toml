@@ -14,6 +14,7 @@ dependencies = [
     "structlog>=24.0.0",
     "opencv-python-headless>=4.8.0",
     "numpy>=1.26.0",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -28,3 +29,4 @@ upload-drive = "file_io.upload_cli:cli"
 show-output = "file_io.show_output:cli"
 bench = "preprocessing.bench:cli"
 bench2 = "model_client.bench:cli"
+run = "main:cli"

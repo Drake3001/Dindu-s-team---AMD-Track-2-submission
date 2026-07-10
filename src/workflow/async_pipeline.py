@@ -130,7 +130,8 @@ async def _preprocess_video(
 async def run_workflow_task(
     task: dict[str, Any],
     *,
-    model_client: AsyncModelClient,
+    vlm_client: AsyncModelClient,
+    caption_client: AsyncModelClient,
     analysis_prompt: Prompt,
     videos_dir: Path,
     styles: list[str],
@@ -139,11 +140,16 @@ async def run_workflow_task(
     process_pool: ProcessPoolExecutor,
     loop: asyncio.AbstractEventLoop,
     preprocess_kwargs: dict[str, Any] | None = None,
+    skip_download: bool = False,
+    caption_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_id = task["task_id"]
     t0 = time.perf_counter()
+    caption_overrides = caption_params or {}
 
-    video_path = await _download_video(task, videos_dir, False, download_sem, loop)
+    video_path = await _download_video(
+        task, videos_dir, skip_download, download_sem, loop
+    )
     t1 = time.perf_counter()
 
     preprocessed = await _preprocess_video(
@@ -159,7 +165,7 @@ async def run_workflow_task(
     grids_meta = preprocessed["grids_meta"]
 
     async with inference_sem:
-        vlm_response = await model_client.generate_from_frame_grids(
+        vlm_response = await vlm_client.generate_from_frame_grids(
             grids_b64,
             analysis_prompt.system,
             analysis_prompt.user,
@@ -170,7 +176,14 @@ async def run_workflow_task(
 
     async def _caption(style: str) -> tuple[str, str]:
         async with inference_sem:
-            text = await async_generate_caption(model_client, analysis, style)
+            text = await async_generate_caption(
+                caption_client,
+                analysis,
+                style,
+                temperature=caption_overrides.get("temperature"),
+                max_tokens=caption_overrides.get("max_tokens"),
+                timeout_seconds=caption_overrides.get("timeout_seconds"),
+            )
         return style, text
 
     caption_pairs = await asyncio.gather(*[_caption(style) for style in styles])
@@ -301,12 +314,15 @@ async def run_bench_task(
 async def run_workflow_tasks(
     tasks: list[dict[str, Any]],
     *,
-    model_client: AsyncModelClient,
+    vlm_client: AsyncModelClient,
+    caption_client: AsyncModelClient,
     analysis_prompt: Prompt,
     videos_dir: Path,
     styles_resolver: Any,
     config: PipelineConfig | None = None,
     preprocess_kwargs: dict[str, Any] | None = None,
+    skip_download: bool = False,
+    caption_params: dict[str, Any] | None = None,
     on_error: Any | None = None,
 ) -> list[dict[str, Any]]:
     cfg = config or PipelineConfig()
@@ -320,12 +336,12 @@ async def run_workflow_tasks(
     with ProcessPoolExecutor(max_workers=preprocess_workers) as process_pool:
 
         async def _run_one(index: int, task: dict[str, Any]) -> None:
-            task_id = task.get("task_id", "unknown")
             try:
                 styles = styles_resolver(task)
                 results[index] = await run_workflow_task(
                     task,
-                    model_client=model_client,
+                    vlm_client=vlm_client,
+                    caption_client=caption_client,
                     analysis_prompt=analysis_prompt,
                     videos_dir=videos_dir,
                     styles=styles,
@@ -334,6 +350,8 @@ async def run_workflow_tasks(
                     process_pool=process_pool,
                     loop=loop,
                     preprocess_kwargs=preprocess_kwargs,
+                    skip_download=skip_download,
+                    caption_params=caption_params,
                 )
             except Exception as error:
                 if on_error is not None:
