@@ -146,8 +146,8 @@ class DetectorState:
         self.slow_ema: np.ndarray | None = None
         self.ema_diff: float = 15.0 # Initialize high to suppress startup junk
 
-    def process_frame(self, frame: np.ndarray) -> bool:
-        """Evaluate a single RGB or grayscale frame. Returns True if it crosses the adaptive threshold."""
+    def process_frame(self, frame: np.ndarray) -> tuple[bool, float]:
+        """Evaluate a single RGB or grayscale frame. Returns (is_important, diff_score)."""
         gray = _to_gray(frame)
         small = _downscale(gray, self.max_dim).astype(np.float32)
         # Apply heavy blur to obliterate high-frequency noise like rippling water
@@ -157,18 +157,22 @@ class DetectorState:
             # First frame always counts as important and seeds the EMAs.
             self.fast_ema = small.copy()
             self.slow_ema = small.copy()
-            return True
+            return True, 0.0
 
         diff = float(np.max(np.abs(self.fast_ema - self.slow_ema)))
         dynamic_threshold = (self.ema_diff * self.diff_multiplier) + self.threshold
         is_important = diff >= dynamic_threshold
+        
+        # Score the structural complexity of the movement to prioritize crashes over camera shakes
+        diff_mat_uint8 = np.abs(self.fast_ema - self.slow_ema).astype(np.uint8)
+        lap_var = float(cv2.Laplacian(diff_mat_uint8, cv2.CV_64F).var())
 
         # Always update the EMAs so they track gradual/normal changes.
         self.fast_ema = self.fast_alpha * small + (1.0 - self.fast_alpha) * self.fast_ema
         self.slow_ema = self.slow_alpha * small + (1.0 - self.slow_alpha) * self.slow_ema
         self.ema_diff = self.diff_alpha * diff + (1.0 - self.diff_alpha) * self.ema_diff
 
-        return is_important
+        return is_important, lap_var
 
 
 def detect_important_frames(

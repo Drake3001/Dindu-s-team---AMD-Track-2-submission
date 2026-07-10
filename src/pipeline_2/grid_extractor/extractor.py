@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 import random
 
-from pipeline_2.important_frames.api import DetectorState
-from preprocessing.vlm_output.grid import frames_to_grid_b64
-from preprocessing.types import Frame, VideoMetadata, PreprocessingError
+from src.pipeline_2.important_frames.detector import DetectorState
+from src.preprocessing.vlm_output.grid import frames_to_grid_b64
+from src.preprocessing.types import Frame, VideoMetadata, PreprocessingError
 
 def _effective_fps(fps: float, duration: float, frame_count: int) -> float:
     if fps > 0:
@@ -82,9 +82,9 @@ def extract_smart_grids(
             if not ok or img is None:
                 break
                 
-            is_important = state.process_frame(img)
+            is_important, diff = state.process_frame(img)
             ts = frame_idx / native_fps
-            current_frame = Frame(index=frame_idx, timestamp=ts, image=_resize_max_dim(img, max_dim))
+            current_frame = Frame(index=frame_idx, timestamp=ts, image=_resize_max_dim(img, max_dim), score=diff)
             
             if is_important:
                 # If we just triggered, save all frames in the past buffer
@@ -130,9 +130,7 @@ def extract_smart_grids(
     
     chosen_context = []
     if actual_context > 0:
-        step = max(1.0, len(unimportant_frames_list) / actual_context)
-        for i in range(actual_context):
-            chosen_context.append(unimportant_frames_list[int(i * step)])
+        chosen_context = random.sample(unimportant_frames_list, actual_context)
 
     important_budget = max_frames - actual_context
     chosen_important = []
@@ -140,9 +138,50 @@ def extract_smart_grids(
         if len(important_frames_list) <= important_budget:
             chosen_important = list(important_frames_list)
         else:
-            step = len(important_frames_list) / important_budget
-            for i in range(important_budget):
-                chosen_important.append(important_frames_list[int(i * step)])
+            # Flattened Normal Distribution Frame Sampling
+            
+            # Find Top Peaks (up to 3 distinct peaks spaced by at least 1.5s to cover prolonged events)
+            sorted_by_score = sorted(important_frames_list, key=lambda f: f.score, reverse=True)
+            peaks = []
+            for f in sorted_by_score:
+                if all(abs(f.timestamp - p.timestamp) > 1.5 for p in peaks):
+                    peaks.append(f)
+                if len(peaks) >= 3:
+                    break
+            
+            # Calculate standard deviation (wider spread to cover prolonged events)
+            sigma = duration / 4.0
+            if sigma <= 0:
+                sigma = 1.0 # fallback
+                
+            # Compute Gaussian weights for all frames
+            weights = np.zeros(len(important_frames_list), dtype=np.float64)
+            for i, f in enumerate(important_frames_list):
+                pdf_sum = sum(np.exp(-0.5 * ((f.timestamp - p.timestamp) / sigma) ** 2) for p in peaks)
+                weights[i] = pdf_sum
+                
+            # Normalize gaussian weights
+            weight_sum = np.sum(weights)
+            if weight_sum > 0:
+                weights /= weight_sum
+            else:
+                weights = np.ones(len(important_frames_list)) / len(important_frames_list)
+                
+            # Flatten the distribution: Mix 50% Gaussian with 50% Uniform
+            uniform_weight = 1.0 / len(important_frames_list)
+            weights = 0.5 * weights + 0.5 * uniform_weight
+            weights /= np.sum(weights) # re-normalize exactly to 1.0
+                
+            # Sample exactly important_budget frames WITHOUT replacement
+            sampled_indices = np.random.choice(
+                len(important_frames_list), 
+                size=important_budget, 
+                replace=False, 
+                p=weights
+            )
+            
+            for idx in sampled_indices:
+                chosen_important.append(important_frames_list[idx])
 
     # Combine and sort chronologically
     final_frames = sorted(chosen_context + chosen_important, key=lambda f: f.index)
