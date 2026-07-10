@@ -1,0 +1,79 @@
+# AMD benchmark test suite
+#
+# Rules:
+# - Always pass --prompt <name> so only ONE prompt style runs per command.
+#   Without it, bench2 runs all 3 prompts on every grid (3x API cost, confounded results).
+# - Each section varies ONE preprocessing or model axis; other params stay at defaults.
+# - Use --skip_download=True after videos are already in videos/.
+# - bench2 reports: output/vlm_output/bench_<timestamp>.json
+#
+# Prompts (src/model_client/prompts/video_analysis/):
+#   concise_factual          - short, dense factual description
+#   detailed_chronological   - moment-by-moment walkthrough
+#   structured_breakdown     - sections: setting, subjects, actions, camera, details
+#
+# Cheaper alternative for sections 2-4: run preprocessing only (no API calls):
+#   uv run bench --max_dim 384 --skip_download=True
+#
+# Defaults: fps=1.0, max_dim=512, prune_threshold=5.0, grid=4x4
+
+
+# --- 1. GRID LAYOUTS ---
+# Sensible: compares API call count, payload size, and frames-per-grid.
+# Prompt: concise for single large grid; detailed when split into smaller grids.
+
+# All frames in one 4x4 grid (fewest API calls, smallest report)
+uv run bench2 --grid_cols 4 --grid_rows 4 --prompt concise_factual --skip_download=True --include_responses=True
+
+# More grids, fewer frames each (higher spatial detail per image)
+uv run bench2 --grid_cols 2 --grid_rows 2 --prompt detailed_chronological --skip_download=True --include_responses=True
+
+
+# --- 2. RESOLUTION (MAX_DIM) ---
+# Sensible: finds quality vs payload-size tradeoff. Skip 128 unless testing extreme compression.
+# Prompt: structured_breakdown keeps output format stable across resolutions.
+
+uv run bench2 --max_dim 512 --prompt structured_breakdown --skip_download=True --include_responses=True
+uv run bench2 --max_dim 384 --prompt structured_breakdown --skip_download=True --include_responses=True
+uv run bench2 --max_dim 256 --prompt structured_breakdown --skip_download=True --include_responses=True
+
+# Optional / edge case — often too degraded for useful VLM output
+# uv run bench2 --max_dim 128 --prompt structured_breakdown --skip_download=True --include_responses=True
+
+
+# --- 3. SAMPLING RATE (FPS) ---
+# Sensible: tests how many frames enter the pipeline. fps=1.0 is the default (baseline).
+# Prompt: detailed_chronological benefits most from denser temporal sampling.
+
+uv run bench2 --fps 0.5 --prompt detailed_chronological --skip_download=True --include_responses=True
+uv run bench2 --fps 1.0 --prompt detailed_chronological --skip_download=True --include_responses=True
+uv run bench2 --fps 2.0 --prompt detailed_chronological --skip_download=True --include_responses=True
+
+
+# --- 4. PRUNING AGGRESSIVENESS (PRUNE_THRESHOLD) ---
+# Sensible only as a pair: compare default (5.0) vs aggressive (12.0).
+# A single high-threshold run alone is hard to interpret without the baseline.
+# Prompt: concise_factual — easier to spot missing content after heavy pruning.
+
+uv run bench2 --prune_threshold 5.0 --prompt concise_factual --skip_download=True --include_responses=True
+uv run bench2 --prune_threshold 12.0 --prompt concise_factual --skip_download=True --include_responses=True
+
+
+# --- 5. MODEL PARAMETERS (TEMPERATURE, TOKENS, TIMEOUT) ---
+# Sensible: cost/latency/verbosity tradeoffs. Match prompt style to generation goal.
+# Prompt A: concise + deterministic short answers. Prompt B: detailed + creative long answers.
+
+# Low temperature, short cheap response
+uv run bench2 --temperature 0.0 --max_tokens 150 --timeout_seconds 30 --prompt concise_factual --skip_download=True --include_responses=True
+
+# Higher temperature, longer response
+uv run bench2 --temperature 0.8 --max_tokens 1000 --timeout_seconds 120 --prompt detailed_chronological --skip_download=True --include_responses=True
+
+
+# --- 6. PROMPT COMPARISON (optional) ---
+# Run when you want to compare prompt styles at fixed preprocessing settings.
+# Use defaults; only the prompt changes between runs.
+
+uv run bench2 --prompt concise_factual --skip_download=True --include_responses=True
+uv run bench2 --prompt structured_breakdown --skip_download=True --include_responses=True
+uv run bench2 --prompt detailed_chronological --skip_download=True --include_responses=True

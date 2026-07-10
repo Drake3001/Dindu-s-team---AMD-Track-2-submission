@@ -42,7 +42,7 @@ log = structlog.get_logger(__name__)
 DEFAULT_TASKS_PATH = Path("input/tasks.json")
 DEFAULT_VIDEOS_DIR = Path("videos")
 DEFAULT_OUTPUT_DIR = Path("output")
-BENCH_SUBDIR = "model_client"
+BENCH_SUBDIR = "vlm_output"
 RESPONSE_PREVIEW_CHARS = 240
 
 
@@ -90,12 +90,39 @@ def _output_record(
         "grid_index": grid_index,
         "prompt": prompt_name,
         "elapsed_s": elapsed_s,
+        "status": "ok",
         "response_chars": len(response),
         "response_preview": response[:RESPONSE_PREVIEW_CHARS],
     }
     if include_response:
         record["response"] = response
     return record
+
+
+def _failed_output_record(
+    grid_index: int,
+    prompt_name: str,
+    elapsed_s: float,
+    error: Exception,
+) -> dict:
+    return {
+        "grid_index": grid_index,
+        "prompt": prompt_name,
+        "elapsed_s": elapsed_s,
+        "status": "failed",
+        "error": str(error),
+    }
+
+
+def _task_status_from_outputs(outputs: list[dict]) -> str:
+    if not outputs:
+        return "failed"
+    failures = sum(1 for output in outputs if output.get("status") == "failed")
+    if failures == 0:
+        return "ok"
+    if failures == len(outputs):
+        return "failed"
+    return "partial"
 
 
 def process_task(
@@ -134,11 +161,26 @@ def process_task(
     for grid_index, grid_b64 in enumerate(preprocessed.grids_b64):
         for prompt in prompts:
             call_start = time.perf_counter()
-            response = model_client.generate_from_frame_grid_base64(
-                grid_b64,
-                prompt.system,
-                prompt.user,
-            )
+            try:
+                response = model_client.generate_from_frame_grid_base64(
+                    grid_b64,
+                    prompt.system,
+                    prompt.user,
+                )
+            except ModelRequestError as exc:
+                elapsed_s = round(time.perf_counter() - call_start, 4)
+                outputs.append(
+                    _failed_output_record(grid_index, prompt.name, elapsed_s, exc)
+                )
+                log.error(
+                    "model_grid_request_failed",
+                    task_id=task_id,
+                    grid_index=grid_index,
+                    prompt=prompt.name,
+                    error=str(exc),
+                )
+                continue
+
             elapsed_s = round(time.perf_counter() - call_start, 4)
             outputs.append(
                 _output_record(
@@ -182,7 +224,7 @@ def process_task(
         },
         "model": _model_info(model_client.config),
         "outputs": outputs,
-        "status": "ok",
+        "status": _task_status_from_outputs(outputs),
     }
 
 
@@ -261,7 +303,13 @@ def main(
                     prompts,
                     include_responses,
                 )
-            except (PreprocessingError, ModelRequestError, KeyError, FileNotFoundError) as exc:
+            except (
+                PreprocessingError,
+                ModelRequestError,
+                KeyError,
+                FileNotFoundError,
+                OSError,
+            ) as exc:
                 result = {
                     "task_id": task.get("task_id", "unknown"),
                     "video_url": task.get("video_url"),
@@ -272,12 +320,14 @@ def main(
                 log.error("model_task_failed", task_id=result["task_id"], error=str(exc))
 
             run_results.append(result)
-            if result.get("status") == "ok":
+            status = result.get("status")
+            if status in {"ok", "partial"}:
                 log.info(
                     "model_task_complete",
                     run=run_idx + 1,
                     runs=runs,
                     task_id=result["task_id"],
+                    status=status,
                     total_s=result["timings_s"]["total"],
                     grids=result["counts"]["grids"],
                     model_requests=result["counts"]["model_requests"],

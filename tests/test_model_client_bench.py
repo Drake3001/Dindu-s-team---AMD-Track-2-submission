@@ -79,12 +79,44 @@ class ModelClientBenchTests(unittest.TestCase):
 
         self.assertEqual(result["outputs"][0]["response"], "full response")
 
-    def test_write_report_uses_model_client_subdir(self) -> None:
+    @patch("model_client.bench.preprocess_video")
+    @patch("model_client.bench._resolve_video_path")
+    def test_process_task_preserves_outputs_when_later_grid_fails(
+        self,
+        resolve_video_path: Mock,
+        preprocess_video: Mock,
+    ) -> None:
+        resolve_video_path.return_value = Path("videos/v1.mp4")
+        preprocess_video.return_value = _preprocess_result(["grid1", "grid2"])
+        model_client = _model_client(["first response", ModelRequestError("model failed")])
+
+        result = process_task(
+            {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
+            model_client,
+            Path("videos"),
+            True,
+            1.0,
+            384,
+            5.0,
+            4,
+            4,
+            8,
+            [TEST_PROMPT],
+            False,
+        )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(len(result["outputs"]), 2)
+        self.assertEqual(result["outputs"][0]["status"], "ok")
+        self.assertEqual(result["outputs"][1]["status"], "failed")
+        self.assertIn("model failed", result["outputs"][1]["error"])
+
+    def test_write_report_uses_vlm_output_subdir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             report_path = _write_report(Path(tmpdir), {"ok": True})
             self.assertTrue(report_path.is_file())
 
-        self.assertIn("model_client", str(report_path))
+        self.assertIn("vlm_output", str(report_path))
         self.assertTrue(report_path.name.startswith("bench_"))
 
     @patch("model_client.bench.load_prompts")
@@ -106,7 +138,7 @@ class ModelClientBenchTests(unittest.TestCase):
         load_prompts.return_value = [TEST_PROMPT]
         create_model_client.return_value = _model_client([])
         process_task_mock.side_effect = ModelRequestError("model failed")
-        write_report.return_value = Path("output/model_client/bench_test.json")
+        write_report.return_value = Path("output/vlm_output/bench_test.json")
 
         main(runs=1)
 
@@ -115,6 +147,45 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertEqual(task["status"], "failed")
         self.assertEqual(task["task_id"], "v1")
         self.assertIn("model failed", task["error"])
+
+    @patch("model_client.bench.load_prompts")
+    @patch("model_client.bench._write_report")
+    @patch("model_client.bench.process_task")
+    @patch("model_client.bench.create_model_client")
+    @patch("model_client.bench.load_input")
+    def test_main_writes_all_tasks_when_one_fails(
+        self,
+        load_input: Mock,
+        create_model_client: Mock,
+        process_task_mock: Mock,
+        write_report: Mock,
+        load_prompts: Mock,
+    ) -> None:
+        load_input.return_value = [
+            {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
+            {"task_id": "v2", "video_url": "https://example.test/v2.mp4"},
+        ]
+        load_prompts.return_value = [TEST_PROMPT]
+        create_model_client.return_value = _model_client([])
+        process_task_mock.side_effect = [
+            {
+                "task_id": "v1",
+                "status": "ok",
+                "timings_s": {"total": 1.0},
+                "counts": {"grids": 1, "model_requests": 1},
+            },
+            ModelRequestError("model failed"),
+        ]
+        write_report.return_value = Path("output/vlm_output/bench_test.json")
+
+        main(runs=1)
+
+        report = write_report.call_args.args[1]
+        tasks = report["tasks"]
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0]["status"], "ok")
+        self.assertEqual(tasks[1]["status"], "failed")
+        self.assertIn("model failed", tasks[1]["error"])
 
 
 def _model_client(responses: list[str]) -> Mock:
