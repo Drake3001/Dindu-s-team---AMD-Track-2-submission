@@ -40,3 +40,12 @@ captions:
     - sarcastic
     - humorous_tech
     - humorous_non_tech
+
+# Per-style overrides: replace the list above with a mapping like this:
+#  styles:
+#    formal:
+#      temperature: 0.3
+#    sarcastic:
+#      model: accounts/fireworks/models/creative-caption
+#      temperature: 1.0
+#    humorous_tech: {}   # inherit all defaults from captions block

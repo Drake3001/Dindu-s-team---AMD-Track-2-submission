@@ -32,6 +32,7 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         vlm_client = AsyncMock()
         vlm_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
         caption_client = AsyncMock()
+        caption_clients = {"formal": caption_client}
 
         tasks = [
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4", "styles": ["formal"]},
@@ -42,7 +43,8 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
             results = await run_workflow_tasks(
                 tasks,
                 vlm_client=vlm_client,
-                caption_client=caption_client,
+                caption_clients=caption_clients,
+                caption_params_for_style=lambda _style: {"temperature": None, "max_tokens": None, "timeout_seconds": None},
                 analysis_prompt=TEST_PROMPT,
                 videos_dir=Path("videos"),
                 styles_resolver=lambda task: task["styles"],
@@ -114,6 +116,7 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         vlm_client = AsyncMock()
         vlm_client.generate_from_frame_grids = AsyncMock(return_value='{"ok": true}')
         caption_client = AsyncMock()
+        caption_clients = {"formal": caption_client}
 
         tasks = [
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4", "styles": ["formal"]},
@@ -128,7 +131,8 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
             await run_workflow_tasks(
                 tasks,
                 vlm_client=vlm_client,
-                caption_client=caption_client,
+                caption_clients=caption_clients,
+                caption_params_for_style=lambda _style: {"temperature": None, "max_tokens": None, "timeout_seconds": None},
                 analysis_prompt=TEST_PROMPT,
                 videos_dir=Path("videos"),
                 styles_resolver=lambda task: task["styles"],

@@ -11,7 +11,7 @@ from model_client.api import create_async_model_client
 from model_client.caption_generation import list_caption_styles
 from model_client.prompts import load_prompt
 from workflow.async_pipeline import run_workflow_tasks
-from workflow.config import AppConfig, load_pipeline_config
+from workflow.config import AppConfig, ModelStageConfig, load_pipeline_config
 
 log = structlog.get_logger(__name__)
 
@@ -41,7 +41,9 @@ def _resolve_videos_dir(cfg: AppConfig, project_root: Path) -> Path:
     return (project_root / cfg.input.videos_dir).resolve()
 
 
-def _make_styles_resolver(default_styles: list[str] | None):
+def _make_styles_resolver(cfg: AppConfig):
+    default_styles = cfg.captions.configured_styles()
+
     def _resolve_styles(task: dict[str, Any]) -> list[str]:
         styles = task.get("styles")
         if styles is not None:
@@ -55,12 +57,12 @@ def _make_styles_resolver(default_styles: list[str] | None):
     return _resolve_styles
 
 
-def _empty_captions(task: dict[str, Any], default_styles: list[str] | None) -> dict[str, str]:
-    resolver = _make_styles_resolver(default_styles)
+def _empty_captions(task: dict[str, Any], cfg: AppConfig) -> dict[str, str]:
+    resolver = _make_styles_resolver(cfg)
     try:
         styles = resolver(task)
     except ValueError:
-        styles = default_styles or list_caption_styles()
+        styles = cfg.captions.configured_styles() or list_caption_styles()
     return {style: "" for style in styles}
 
 
@@ -71,12 +73,42 @@ def _write_results(results: list[dict[str, Any]], output_path: Path) -> None:
         handle.write("\n")
 
 
-def _caption_params(cfg: AppConfig) -> dict[str, Any]:
+def _caption_params_for_style(cfg: AppConfig, style: str) -> dict[str, Any]:
+    model_cfg = cfg.captions.model_for_style(style)
     return {
-        "temperature": cfg.captions.model.temperature,
-        "max_tokens": cfg.captions.model.max_tokens,
-        "timeout_seconds": cfg.captions.model.timeout_seconds,
+        "temperature": model_cfg.temperature,
+        "max_tokens": model_cfg.max_tokens,
+        "timeout_seconds": model_cfg.timeout_seconds,
     }
+
+
+def _model_client_key(model_cfg: ModelStageConfig) -> tuple[Any, ...]:
+    return (
+        model_cfg.provider,
+        model_cfg.model,
+        model_cfg.temperature,
+        model_cfg.max_tokens,
+        model_cfg.timeout_seconds,
+    )
+
+
+def _build_caption_clients(cfg: AppConfig) -> dict[str, Any]:
+    client_cache: dict[tuple[Any, ...], Any] = {}
+    clients: dict[str, Any] = {}
+
+    known_styles = set(list_caption_styles())
+    configured = cfg.captions.configured_styles()
+    style_names = set(configured or known_styles)
+    style_names.update(known_styles)
+
+    for style in style_names:
+        model_cfg = cfg.captions.model_for_style(style)
+        key = _model_client_key(model_cfg)
+        if key not in client_cache:
+            client_cache[key] = _create_stage_client(model_cfg)
+        clients[style] = client_cache[key]
+
+    return clients
 
 
 def _create_stage_client(model_cfg) -> Any:
@@ -91,29 +123,28 @@ def _create_stage_client(model_cfg) -> Any:
 
 async def _run_workflow(cfg: AppConfig, tasks: list[dict[str, Any]], project_root: Path) -> list[dict[str, Any]]:
     vlm_client = _create_stage_client(cfg.vlm.model)
-    caption_client = _create_stage_client(cfg.captions.model)
+    caption_clients = _build_caption_clients(cfg)
     analysis_prompt = load_prompt(cfg.vlm.prompt)
-    default_styles = cfg.captions.styles
 
     def on_error(task: dict[str, Any], error: Exception) -> dict[str, Any]:
         task_id = task.get("task_id", "unknown")
         log.error("workflow_task_failed", task_id=task_id, error=str(error))
         return {
             "task_id": task_id,
-            "captions": _empty_captions(task, default_styles),
+            "captions": _empty_captions(task, cfg),
         }
 
     return await run_workflow_tasks(
         tasks,
         vlm_client=vlm_client,
-        caption_client=caption_client,
+        caption_clients=caption_clients,
+        caption_params_for_style=lambda style: _caption_params_for_style(cfg, style),
         analysis_prompt=analysis_prompt,
         videos_dir=_resolve_videos_dir(cfg, project_root),
-        styles_resolver=_make_styles_resolver(default_styles),
+        styles_resolver=_make_styles_resolver(cfg),
         config=cfg.pipeline.pipeline_config,
         preprocess_kwargs=cfg.pipeline.preprocess_kwargs,
         skip_download=cfg.input.skip_download,
-        caption_params=_caption_params(cfg),
         on_error=on_error,
     )
 

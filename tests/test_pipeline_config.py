@@ -133,6 +133,43 @@ captions:
         self.assertIsNone(cfg.captions.model.provider)
         self.assertIsNone(cfg.captions.model.model)
 
+    def test_per_style_mapping_merges_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "pipeline.yaml"
+            config_path.write_text(
+                """
+vlm:
+  prompt: detailed_chronological
+captions:
+  provider: fireworks
+  model: accounts/fireworks/models/default-caption
+  temperature: 0.7
+  max_tokens: 512
+  timeout_seconds: 60
+  styles:
+    formal:
+      temperature: 0.2
+      max_tokens: 400
+    sarcastic:
+      model: accounts/fireworks/models/creative-caption
+      temperature: 1.0
+""",
+                encoding="utf-8",
+            )
+
+            cfg = load_pipeline_config(config_path, project_root=Path(tmpdir))
+
+        self.assertIsNotNone(cfg.captions.style_models)
+        formal = cfg.captions.model_for_style("formal")
+        sarcastic = cfg.captions.model_for_style("sarcastic")
+
+        self.assertEqual(formal.model, "accounts/fireworks/models/default-caption")
+        self.assertEqual(formal.temperature, 0.2)
+        self.assertEqual(formal.max_tokens, 400)
+        self.assertEqual(sarcastic.model, "accounts/fireworks/models/creative-caption")
+        self.assertEqual(sarcastic.temperature, 1.0)
+        self.assertEqual(cfg.captions.configured_styles(), ["formal", "sarcastic"])
+
 
 if __name__ == "__main__":
     unittest.main()

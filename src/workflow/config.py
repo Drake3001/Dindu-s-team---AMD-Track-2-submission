@@ -128,6 +128,17 @@ class VlmConfig:
 class CaptionConfig:
     model: ModelStageConfig
     styles: list[str] | None
+    style_models: dict[str, ModelStageConfig] | None = None
+
+    def configured_styles(self) -> list[str] | None:
+        if self.style_models is not None:
+            return list(self.style_models.keys())
+        return self.styles
+
+    def model_for_style(self, style: str) -> ModelStageConfig:
+        if self.style_models is not None and style in self.style_models:
+            return self.style_models[style]
+        return self.model
 
 
 @dataclass(frozen=True)
@@ -215,12 +226,66 @@ def _parse_model_stage(data: dict[str, Any], section: str) -> ModelStageConfig:
     )
 
 
-def _parse_styles(value: Any) -> list[str] | None:
-    if value is None:
-        return None
+def _merge_model_stage(
+    base: ModelStageConfig,
+    override: dict[str, Any],
+    section: str,
+) -> ModelStageConfig:
+    provider = override.get("provider", base.provider)
+    model = override.get("model", base.model)
+    temperature = override.get("temperature", base.temperature)
+    max_tokens = override.get("max_tokens", base.max_tokens)
+    timeout_seconds = override.get("timeout_seconds", base.timeout_seconds)
+
+    return ModelStageConfig(
+        provider=_read_optional_str(provider, "provider", section)
+        if "provider" in override
+        else base.provider,
+        model=_read_optional_str(model, "model", section) if "model" in override else base.model,
+        temperature=_read_optional_float(temperature, "temperature", section)
+        if "temperature" in override
+        else base.temperature,
+        max_tokens=_read_optional_int(max_tokens, "max_tokens", section)
+        if "max_tokens" in override
+        else base.max_tokens,
+        timeout_seconds=_read_optional_float(timeout_seconds, "timeout_seconds", section)
+        if "timeout_seconds" in override
+        else base.timeout_seconds,
+    )
+
+
+def _parse_styles_list(value: Any) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ConfigError("captions.styles must be a list of strings or null")
+        raise ConfigError("captions.styles must be a list of strings or a mapping")
     return [item.strip() for item in value if item.strip()]
+
+
+def _parse_styles(
+    value: Any,
+    default_model: ModelStageConfig,
+) -> tuple[list[str] | None, dict[str, ModelStageConfig] | None]:
+    if value is None:
+        return None, None
+    if isinstance(value, list):
+        styles = _parse_styles_list(value)
+        return styles, None
+    if isinstance(value, dict):
+        style_models: dict[str, ModelStageConfig] = {}
+        for style_name, override in value.items():
+            if not isinstance(style_name, str) or not style_name.strip():
+                raise ConfigError("captions.styles mapping keys must be non-empty strings")
+            section = f"captions.styles.{style_name.strip()}"
+            if override is None:
+                override = {}
+            if not isinstance(override, dict):
+                raise ConfigError(f"{section} must be a mapping or null")
+            style_models[style_name.strip()] = _merge_model_stage(
+                default_model,
+                override,
+                section,
+            )
+        return list(style_models.keys()), style_models
+    raise ConfigError("captions.styles must be a list of strings, a mapping, or null")
 
 
 def _validate_prompt(prompt_name: str) -> None:
@@ -291,7 +356,11 @@ def load_pipeline_config(path: Path, *, project_root: Path | None = None) -> App
         raise ConfigError("vlm.prompt must be a non-empty string")
     _validate_prompt(vlm_prompt)
 
-    caption_styles = _parse_styles(captions_data.get("styles"))
+    default_caption_model = _parse_model_stage(captions_data, "captions")
+    caption_styles, style_models = _parse_styles(
+        captions_data.get("styles"),
+        default_caption_model,
+    )
     _validate_styles(caption_styles)
 
     return AppConfig(
@@ -341,7 +410,8 @@ def load_pipeline_config(path: Path, *, project_root: Path | None = None) -> App
             prompt=vlm_prompt,
         ),
         captions=CaptionConfig(
-            model=_parse_model_stage(captions_data, "captions"),
+            model=default_caption_model,
             styles=caption_styles,
+            style_models=style_models,
         ),
     )

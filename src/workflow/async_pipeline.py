@@ -131,7 +131,8 @@ async def run_workflow_task(
     task: dict[str, Any],
     *,
     vlm_client: AsyncModelClient,
-    caption_client: AsyncModelClient,
+    caption_clients: dict[str, AsyncModelClient],
+    caption_params_for_style: Any,
     analysis_prompt: Prompt,
     videos_dir: Path,
     styles: list[str],
@@ -141,11 +142,9 @@ async def run_workflow_task(
     loop: asyncio.AbstractEventLoop,
     preprocess_kwargs: dict[str, Any] | None = None,
     skip_download: bool = False,
-    caption_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_id = task["task_id"]
     t0 = time.perf_counter()
-    caption_overrides = caption_params or {}
 
     video_path = await _download_video(
         task, videos_dir, skip_download, download_sem, loop
@@ -175,14 +174,18 @@ async def run_workflow_task(
     t3 = time.perf_counter()
 
     async def _caption(style: str) -> tuple[str, str]:
+        client = caption_clients.get(style)
+        if client is None:
+            raise ModelRequestError(f"No caption client configured for style '{style}'")
+        params = caption_params_for_style(style)
         async with inference_sem:
             text = await async_generate_caption(
-                caption_client,
+                client,
                 analysis,
                 style,
-                temperature=caption_overrides.get("temperature"),
-                max_tokens=caption_overrides.get("max_tokens"),
-                timeout_seconds=caption_overrides.get("timeout_seconds"),
+                temperature=params.get("temperature"),
+                max_tokens=params.get("max_tokens"),
+                timeout_seconds=params.get("timeout_seconds"),
             )
         return style, text
 
@@ -315,14 +318,14 @@ async def run_workflow_tasks(
     tasks: list[dict[str, Any]],
     *,
     vlm_client: AsyncModelClient,
-    caption_client: AsyncModelClient,
+    caption_clients: dict[str, AsyncModelClient],
+    caption_params_for_style: Any,
     analysis_prompt: Prompt,
     videos_dir: Path,
     styles_resolver: Any,
     config: PipelineConfig | None = None,
     preprocess_kwargs: dict[str, Any] | None = None,
     skip_download: bool = False,
-    caption_params: dict[str, Any] | None = None,
     on_error: Any | None = None,
 ) -> list[dict[str, Any]]:
     cfg = config or PipelineConfig()
@@ -341,7 +344,8 @@ async def run_workflow_tasks(
                 results[index] = await run_workflow_task(
                     task,
                     vlm_client=vlm_client,
-                    caption_client=caption_client,
+                    caption_clients=caption_clients,
+                    caption_params_for_style=caption_params_for_style,
                     analysis_prompt=analysis_prompt,
                     videos_dir=videos_dir,
                     styles=styles,
@@ -351,7 +355,6 @@ async def run_workflow_tasks(
                     loop=loop,
                     preprocess_kwargs=preprocess_kwargs,
                     skip_download=skip_download,
-                    caption_params=caption_params,
                 )
             except Exception as error:
                 if on_error is not None:

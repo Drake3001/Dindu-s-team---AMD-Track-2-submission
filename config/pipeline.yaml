@@ -1,7 +1,7 @@
 input:
-  tasks: input/tasks.json
+  tasks: input/test.json
   videos_dir: videos
-  skip_download: false
+  skip_download: True
 
 output:
   path: output/results.json
@@ -19,21 +19,24 @@ pipeline:
     max_inference_workers: 3
 
 vlm:
-  provider: openrouter
-  model: null
+  provider: fireworks
+  model: accounts/fireworks/models/qwen3p7-plus
   temperature: 0.0
-  max_tokens: 1024
+  max_tokens: 8192
   timeout_seconds: 60
   prompt: detailed_chronological
 
 captions:
-  provider: openrouter
-  model: null
-  temperature: null
-  max_tokens: 512
+  provider: fireworks
+  model: accounts/fireworks/models/deepseek-v4-pro
+  temperature: 0.2
+  max_tokens: 2048
   timeout_seconds: 60
   styles:
-    - formal
-    - sarcastic
-    - humorous_tech
-    - humorous_non_tech
+    formal: {}
+    sarcastic: 
+      temperature: 0.6
+    humorous_tech:
+      temperature: 0.6
+    humorous_non_tech:
+      temperature: 0.6
