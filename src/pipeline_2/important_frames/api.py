@@ -15,20 +15,23 @@ from pathlib import Path
 import numpy as np
 
 from .detector import (
-    DEFAULT_ALPHA,
+    DEFAULT_FAST_ALPHA,
+    DEFAULT_SLOW_ALPHA,
     DEFAULT_MAX_DIM,
     DEFAULT_PADDING,
     DEFAULT_THRESHOLD,
     DEFAULT_DIFF_ALPHA,
     DEFAULT_DIFF_MULTIPLIER,
     detect_important_frames,
+    DetectorState,
 )
 
 
 def get_important_frames(
     video_path: str | Path,
     *,
-    alpha: float = DEFAULT_ALPHA,
+    fast_alpha: float = DEFAULT_FAST_ALPHA,
+    slow_alpha: float = DEFAULT_SLOW_ALPHA,
     threshold: float = DEFAULT_THRESHOLD,
     max_dim: int = DEFAULT_MAX_DIM,
     padding: int = DEFAULT_PADDING,
@@ -65,7 +68,8 @@ def get_important_frames(
     """
     result = detect_important_frames(
         video_path,
-        alpha=alpha,
+        fast_alpha=fast_alpha,
+        slow_alpha=slow_alpha,
         threshold=threshold,
         max_dim=max_dim,
         padding=padding,

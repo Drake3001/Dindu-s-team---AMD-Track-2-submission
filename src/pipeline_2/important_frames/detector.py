@@ -28,21 +28,19 @@ from .types import DetectionResult, ImportantFramesError
 log = logging.getLogger(__name__)
 
 # ── defaults ────────────────────────────────────────────────────────────
-DEFAULT_ALPHA: float = 0.01
-"""EMA smoothing factor.  Lower → slower adaptation, keeps a stable
-background model that ignores gradual motion.  At 0.01 the half-life is
-~69 frames (~2.3 s at 30 fps), so only abrupt departures break through."""
+DEFAULT_FAST_ALPHA: float = 0.05
+"""Fast EMA smoothing factor. Tracks the immediate state of the scene."""
 
-DEFAULT_THRESHOLD: float = 10.0
-"""Base pixel-difference threshold (0–255 scale) for the 98th percentile.
-If at least 2% of the frame deviates from the EMA by this amount + the
-adaptive baseline, it is flagged as important."""
+DEFAULT_SLOW_ALPHA: float = 0.001
+"""Slow EMA smoothing factor. Tracks the long-term background."""
+
+DEFAULT_THRESHOLD: float = 30.0
+"""Base pixel-difference threshold (0–255 scale)."""
 
 DEFAULT_DIFF_ALPHA: float = 0.05
-"""EMA smoothing factor for the difference score itself. Used to track
-the 'normal' amount of chaos in the scene (e.g. constant traffic)."""
+"""EMA smoothing factor for the difference score itself."""
 
-DEFAULT_DIFF_MULTIPLIER: float = 1.5
+DEFAULT_DIFF_MULTIPLIER: float = 0.0
 """Multiplier for the difference baseline. A frame is flagged if its
 difference exceeds: `(baseline_diff * multiplier) + base_threshold`."""
 
@@ -127,10 +125,57 @@ def _pad_and_merge(
 
 # ── core detector ───────────────────────────────────────────────────────
 
+class DetectorState:
+    """Maintains the EMA and adaptive threshold state for processing video frames one by one."""
+    def __init__(
+        self,
+        fast_alpha: float = DEFAULT_FAST_ALPHA,
+        slow_alpha: float = DEFAULT_SLOW_ALPHA,
+        threshold: float = DEFAULT_THRESHOLD,
+        max_dim: int = DEFAULT_MAX_DIM,
+        diff_alpha: float = DEFAULT_DIFF_ALPHA,
+        diff_multiplier: float = DEFAULT_DIFF_MULTIPLIER,
+    ):
+        self.fast_alpha = fast_alpha
+        self.slow_alpha = slow_alpha
+        self.threshold = threshold
+        self.max_dim = max_dim
+        self.diff_alpha = diff_alpha
+        self.diff_multiplier = diff_multiplier
+        self.fast_ema: np.ndarray | None = None
+        self.slow_ema: np.ndarray | None = None
+        self.ema_diff: float = 15.0 # Initialize high to suppress startup junk
+
+    def process_frame(self, frame: np.ndarray) -> bool:
+        """Evaluate a single RGB or grayscale frame. Returns True if it crosses the adaptive threshold."""
+        gray = _to_gray(frame)
+        small = _downscale(gray, self.max_dim).astype(np.float32)
+        # Apply heavy blur to obliterate high-frequency noise like rippling water
+        small = cv2.GaussianBlur(small, (11, 11), 0)
+
+        if self.fast_ema is None:
+            # First frame always counts as important and seeds the EMAs.
+            self.fast_ema = small.copy()
+            self.slow_ema = small.copy()
+            return True
+
+        diff = float(np.max(np.abs(self.fast_ema - self.slow_ema)))
+        dynamic_threshold = (self.ema_diff * self.diff_multiplier) + self.threshold
+        is_important = diff >= dynamic_threshold
+
+        # Always update the EMAs so they track gradual/normal changes.
+        self.fast_ema = self.fast_alpha * small + (1.0 - self.fast_alpha) * self.fast_ema
+        self.slow_ema = self.slow_alpha * small + (1.0 - self.slow_alpha) * self.slow_ema
+        self.ema_diff = self.diff_alpha * diff + (1.0 - self.diff_alpha) * self.ema_diff
+
+        return is_important
+
+
 def detect_important_frames(
     video_path: str | Path,
     *,
-    alpha: float = DEFAULT_ALPHA,
+    fast_alpha: float = DEFAULT_FAST_ALPHA,
+    slow_alpha: float = DEFAULT_SLOW_ALPHA,
     threshold: float = DEFAULT_THRESHOLD,
     max_dim: int = DEFAULT_MAX_DIM,
     padding: int = DEFAULT_PADDING,
@@ -188,31 +233,23 @@ def detect_important_frames(
         ema_diff: float = 0.0
         important: list[int] = []
 
+        state = DetectorState(
+            fast_alpha=fast_alpha,
+            slow_alpha=slow_alpha,
+            threshold=threshold,
+            max_dim=max_dim,
+            diff_alpha=diff_alpha,
+            diff_multiplier=diff_multiplier,
+        )
+
         frame_idx = 0
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
 
-            gray = _to_gray(frame)
-            small = _downscale(gray, max_dim).astype(np.float32)
-
-            if ema is None:
-                # First frame always counts as important and seeds the EMA.
-                ema = small.copy()
-                ema_diff = 0.0
+            if state.process_frame(frame):
                 important.append(frame_idx)
-            else:
-                diff = float(np.percentile(np.abs(small - ema), 98))
-                
-                # Adaptive threshold logic
-                dynamic_threshold = (ema_diff * diff_multiplier) + threshold
-                if diff >= dynamic_threshold:
-                    important.append(frame_idx)
-                
-                # Always update the EMAs so they track gradual/normal changes.
-                ema = alpha * small + (1.0 - alpha) * ema
-                ema_diff = diff_alpha * diff + (1.0 - diff_alpha) * ema_diff
 
             frame_idx += 1
     finally:
@@ -238,7 +275,8 @@ def detect_important_frames(
             "raw_crossings": len(important),
             "important_count": len(result_array),
             "padding": padding,
-            "alpha": alpha,
+            "fast_alpha": fast_alpha,
+            "slow_alpha": slow_alpha,
             "threshold": threshold,
         },
     )
