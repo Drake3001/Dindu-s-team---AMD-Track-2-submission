@@ -6,7 +6,10 @@ from unittest.mock import Mock, patch
 
 from model_client.bench import _write_report, main, process_task
 from model_client.config import ModelConfig
+from model_client.prompts import Prompt
 from model_client.types import ModelRequestError
+
+TEST_PROMPT = Prompt(name="test", system="System", user="User")
 
 
 class ModelClientBenchTests(unittest.TestCase):
@@ -33,8 +36,7 @@ class ModelClientBenchTests(unittest.TestCase):
             4,
             4,
             8,
-            "System",
-            "User",
+            [TEST_PROMPT],
             False,
         )
 
@@ -43,6 +45,8 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertEqual(result["counts"]["grids"], 2)
         self.assertEqual(result["counts"]["model_requests"], 2)
         self.assertEqual(result["model"]["provider"], "openrouter")
+        self.assertEqual(result["outputs"][0]["prompt"], "test")
+        self.assertIn("elapsed_s", result["outputs"][0])
         self.assertEqual(result["outputs"][0]["response_chars"], len("first response"))
         self.assertNotIn("response", result["outputs"][0])
         self.assertIn("model_request", result["timings_s"])
@@ -69,8 +73,7 @@ class ModelClientBenchTests(unittest.TestCase):
             4,
             4,
             8,
-            "System",
-            "User",
+            [TEST_PROMPT],
             True,
         )
 
@@ -84,6 +87,7 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertIn("model_client", str(report_path))
         self.assertTrue(report_path.name.startswith("bench_"))
 
+    @patch("model_client.bench.load_prompts")
     @patch("model_client.bench._write_report")
     @patch("model_client.bench.process_task")
     @patch("model_client.bench.create_model_client")
@@ -94,10 +98,12 @@ class ModelClientBenchTests(unittest.TestCase):
         create_model_client: Mock,
         process_task_mock: Mock,
         write_report: Mock,
+        load_prompts: Mock,
     ) -> None:
         load_input.return_value = [
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
         ]
+        load_prompts.return_value = [TEST_PROMPT]
         create_model_client.return_value = _model_client([])
         process_task_mock.side_effect = ModelRequestError("model failed")
         write_report.return_value = Path("output/model_client/bench_test.json")
