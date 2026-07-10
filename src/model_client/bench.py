@@ -5,6 +5,7 @@ Usage:
     uv run bench2
     uv run bench2 --skip_download=True
     uv run bench2 --fps 1 --max_dim 384 --max_frames 8
+    uv run bench2 --prompt detailed_chronological
     uv run bench2 --include_responses=True
 """
 
@@ -23,6 +24,7 @@ from file_io.api import configure_logging, load_input
 from file_io.download import download_for_task, expected_video_path
 from model_client.api import create_model_client
 from model_client.config import ModelConfig
+from model_client.prompts import Prompt, load_prompts
 from model_client.types import ModelRequestError
 from preprocessing.preprocessing import (
     DEFAULT_GRID_COLS,
@@ -41,8 +43,6 @@ DEFAULT_TASKS_PATH = Path("input/tasks.json")
 DEFAULT_VIDEOS_DIR = Path("videos")
 DEFAULT_OUTPUT_DIR = Path("output")
 BENCH_SUBDIR = "model_client"
-DEFAULT_SYSTEM_PROMPT = "You analyze video frame grids and describe the visible sequence clearly."
-DEFAULT_USER_PROMPT = "Describe what happens in this video based on the frame grid."
 RESPONSE_PREVIEW_CHARS = 240
 
 
@@ -79,9 +79,17 @@ def _model_info(config: ModelConfig) -> dict:
     }
 
 
-def _output_record(grid_index: int, response: str, include_response: bool) -> dict:
+def _output_record(
+    grid_index: int,
+    prompt_name: str,
+    response: str,
+    elapsed_s: float,
+    include_response: bool,
+) -> dict:
     record = {
         "grid_index": grid_index,
+        "prompt": prompt_name,
+        "elapsed_s": elapsed_s,
         "response_chars": len(response),
         "response_preview": response[:RESPONSE_PREVIEW_CHARS],
     }
@@ -101,8 +109,7 @@ def process_task(
     grid_cols: int,
     grid_rows: int,
     max_frames: int | None,
-    system_prompt: str,
-    user_prompt: str,
+    prompts: list[Prompt],
     include_responses: bool,
 ) -> dict:
     task_id = task["task_id"]
@@ -125,12 +132,23 @@ def process_task(
 
     outputs = []
     for grid_index, grid_b64 in enumerate(preprocessed.grids_b64):
-        response = model_client.generate_from_frame_grid_base64(
-            grid_b64,
-            system_prompt,
-            user_prompt,
-        )
-        outputs.append(_output_record(grid_index, response, include_responses))
+        for prompt in prompts:
+            call_start = time.perf_counter()
+            response = model_client.generate_from_frame_grid_base64(
+                grid_b64,
+                prompt.system,
+                prompt.user,
+            )
+            elapsed_s = round(time.perf_counter() - call_start, 4)
+            outputs.append(
+                _output_record(
+                    grid_index,
+                    prompt.name,
+                    response,
+                    elapsed_s,
+                    include_responses,
+                )
+            )
     t3 = time.perf_counter()
 
     gc.collect()
@@ -180,8 +198,7 @@ def main(
     max_frames: int | None = DEFAULT_MAX_FRAMES,
     skip_download: bool = False,
     runs: int = 1,
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    user_prompt: str = DEFAULT_USER_PROMPT,
+    prompt: str | None = None,
     include_responses: bool = False,
     temperature: float | None = None,
     max_tokens: int | None = None,
@@ -202,6 +219,7 @@ def main(
         max_tokens=max_tokens,
         timeout_seconds=timeout_seconds,
     )
+    prompts = load_prompts([prompt] if prompt else None)
 
     params = {
         "tasks": str(tasks_path),
@@ -215,8 +233,7 @@ def main(
         "max_frames": max_frames,
         "skip_download": skip_download,
         "runs": runs,
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
+        "prompts": [p.name for p in prompts],
         "include_responses": include_responses,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -241,8 +258,7 @@ def main(
                     grid_cols,
                     grid_rows,
                     max_frames,
-                    system_prompt,
-                    user_prompt,
+                    prompts,
                     include_responses,
                 )
             except (PreprocessingError, ModelRequestError, KeyError, FileNotFoundError) as exc:

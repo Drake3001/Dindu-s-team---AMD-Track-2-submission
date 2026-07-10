@@ -55,6 +55,36 @@ def _write_report(output_dir: Path, report: dict) -> Path:
     return report_path
 
 
+def _b64_sizes(grids_b64: list[str]) -> dict:
+    per_grid = []
+    total_b64 = 0
+    total_decoded = 0
+    for i, s in enumerate(grids_b64):
+        b64_bytes = len(s)
+        padding = s.count("=")
+        decoded_bytes = (len(s) * 3) // 4 - padding
+        per_grid.append(
+            {
+                "grid_index": i,
+                "b64_bytes": b64_bytes,
+                "b64_kb": round(b64_bytes / 1024, 2),
+                "decoded_bytes": decoded_bytes,
+                "decoded_kb": round(decoded_bytes / 1024, 2),
+            }
+        )
+        total_b64 += b64_bytes
+        total_decoded += decoded_bytes
+    n = len(grids_b64)
+    return {
+        "per_grid": per_grid,
+        "total_b64_bytes": total_b64,
+        "total_b64_kb": round(total_b64 / 1024, 2),
+        "total_decoded_bytes": total_decoded,
+        "total_decoded_kb": round(total_decoded / 1024, 2),
+        "avg_b64_bytes": round(total_b64 / n) if n else 0,
+    }
+
+
 def _resolve_video_path(
     task: dict,
     videos_dir: Path,
@@ -122,6 +152,7 @@ def process_task(
             "post_pruned": result.post_pruned_count,
             "grids": len(result.grids_b64),
         },
+        "base64_sizes": _b64_sizes(result.grids_b64),
         "timings_s": {
             "resolve_video": round(t1 - t0, 4),
             "preprocess": round(t2 - t1, 4),
@@ -208,6 +239,7 @@ def main(
                     sampled=result["counts"]["sampled"],
                     post_pruned=result["counts"]["post_pruned"],
                     grids=result["counts"]["grids"],
+                    total_b64_kb=result["base64_sizes"]["total_b64_kb"],
                 )
 
         all_runs.append({"run": run_idx + 1, "tasks": run_results})
