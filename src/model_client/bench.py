@@ -80,11 +80,11 @@ def _model_info(config: ModelConfig) -> dict:
 
 
 def _output_record(
-    grid_index: int,
     prompt_name: str,
     response: str,
     elapsed_s: float,
     include_response: bool,
+    grids_sent: int,
 ) -> dict:
     valid_json = False
     try:
@@ -94,13 +94,13 @@ def _output_record(
         pass
 
     record = {
-        "grid_index": grid_index,
         "prompt": prompt_name,
         "elapsed_s": elapsed_s,
         "status": "ok",
         "response_chars": len(response),
         "response_preview": response[:RESPONSE_PREVIEW_CHARS],
         "valid_json": valid_json,
+        "grids_sent": grids_sent,
     }
     if include_response:
         record["response"] = response
@@ -108,17 +108,17 @@ def _output_record(
 
 
 def _failed_output_record(
-    grid_index: int,
     prompt_name: str,
     elapsed_s: float,
     error: Exception,
+    grids_sent: int,
 ) -> dict:
     return {
-        "grid_index": grid_index,
         "prompt": prompt_name,
         "elapsed_s": elapsed_s,
         "status": "failed",
         "error": str(error),
+        "grids_sent": grids_sent,
     }
 
 
@@ -165,46 +165,67 @@ def process_task(
     )
     t2 = time.perf_counter()
 
-    outputs = []
-    for grid_index, grid in enumerate(preprocessed.grids):
-        for prompt in prompts:
-            call_start = time.perf_counter()
-            try:
-                response = model_client.generate_from_frame_grid_base64(
-                    grid.b64,
-                    prompt.system,
-                    prompt.user,
-                    frame_count=grid.frame_count,
-                    cols=grid.cols,
-                    rows=grid.rows,
-                    empty_cells=grid.empty_cells,
-                    width_px=grid.width_px,
-                    height_px=grid.height_px,
-                )
-            except ModelRequestError as exc:
-                elapsed_s = round(time.perf_counter() - call_start, 4)
-                outputs.append(
-                    _failed_output_record(grid_index, prompt.name, elapsed_s, exc)
-                )
-                log.error(
-                    "model_grid_request_failed",
-                    task_id=task_id,
-                    grid_index=grid_index,
-                    prompt=prompt.name,
-                    error=str(exc),
-                )
-                continue
+    grids_b64 = [grid.b64 for grid in preprocessed.grids]
+    grids_meta = [
+        {
+            "frame_count": grid.frame_count,
+            "cols": grid.cols,
+            "rows": grid.rows,
+            "empty_cells": grid.empty_cells,
+            "width_px": grid.width_px,
+            "height_px": grid.height_px,
+        }
+        for grid in preprocessed.grids
+    ]
+    grids_sent = len(grids_b64)
 
+    outputs = []
+    for prompt in prompts:
+        call_start = time.perf_counter()
+        if not grids_b64:
+            elapsed_s = round(time.perf_counter() - call_start, 4)
+            error = ModelRequestError("No grid images available for model request")
+            outputs.append(
+                _failed_output_record(prompt.name, elapsed_s, error, grids_sent)
+            )
+            log.error(
+                "model_grid_request_failed",
+                task_id=task_id,
+                prompt=prompt.name,
+                error=str(error),
+            )
+            continue
+
+        try:
+            response = model_client.generate_from_frame_grids(
+                grids_b64,
+                prompt.system,
+                prompt.user,
+                grids_meta=grids_meta,
+            )
+        except ModelRequestError as exc:
             elapsed_s = round(time.perf_counter() - call_start, 4)
             outputs.append(
-                _output_record(
-                    grid_index,
-                    prompt.name,
-                    response,
-                    elapsed_s,
-                    include_responses,
-                )
+                _failed_output_record(prompt.name, elapsed_s, exc, grids_sent)
             )
+            log.error(
+                "model_grid_request_failed",
+                task_id=task_id,
+                prompt=prompt.name,
+                error=str(exc),
+            )
+            continue
+
+        elapsed_s = round(time.perf_counter() - call_start, 4)
+        outputs.append(
+            _output_record(
+                prompt.name,
+                response,
+                elapsed_s,
+                include_responses,
+                grids_sent,
+            )
+        )
     t3 = time.perf_counter()
 
     gc.collect()

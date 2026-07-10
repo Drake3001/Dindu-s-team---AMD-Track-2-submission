@@ -23,7 +23,7 @@ class ModelClientBenchTests(unittest.TestCase):
         video_path = Path("videos/v1.mp4")
         resolve_video_path.return_value = video_path
         preprocess_video.return_value = _preprocess_result(["grid1", "grid2"])
-        model_client = _model_client(["first response", "second response"])
+        model_client = _model_client(["first response"])
 
         result = process_task(
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
@@ -43,14 +43,17 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["video_path"], str(video_path))
         self.assertEqual(result["counts"]["grids"], 2)
-        self.assertEqual(result["counts"]["model_requests"], 2)
+        self.assertEqual(result["counts"]["model_requests"], 1)
         self.assertEqual(result["model"]["provider"], "openrouter")
         self.assertEqual(result["outputs"][0]["prompt"], "test")
+        self.assertEqual(result["outputs"][0]["grids_sent"], 2)
+        self.assertNotIn("grid_index", result["outputs"][0])
         self.assertIn("elapsed_s", result["outputs"][0])
         self.assertEqual(result["outputs"][0]["response_chars"], len("first response"))
         self.assertNotIn("response", result["outputs"][0])
         self.assertIn("valid_json", result["outputs"][0])
         self.assertIn("model_request", result["timings_s"])
+        model_client.generate_from_frame_grids.assert_called_once()
 
     @patch("model_client.bench.preprocess_video")
     @patch("model_client.bench._resolve_video_path")
@@ -82,14 +85,14 @@ class ModelClientBenchTests(unittest.TestCase):
 
     @patch("model_client.bench.preprocess_video")
     @patch("model_client.bench._resolve_video_path")
-    def test_process_task_preserves_outputs_when_later_grid_fails(
+    def test_process_task_records_failure_when_model_call_fails(
         self,
         resolve_video_path: Mock,
         preprocess_video: Mock,
     ) -> None:
         resolve_video_path.return_value = Path("videos/v1.mp4")
         preprocess_video.return_value = _preprocess_result(["grid1", "grid2"])
-        model_client = _model_client(["first response", ModelRequestError("model failed")])
+        model_client = _model_client([ModelRequestError("model failed")])
 
         result = process_task(
             {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
@@ -106,11 +109,42 @@ class ModelClientBenchTests(unittest.TestCase):
             False,
         )
 
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(len(result["outputs"]), 2)
-        self.assertEqual(result["outputs"][0]["status"], "ok")
-        self.assertEqual(result["outputs"][1]["status"], "failed")
-        self.assertIn("model failed", result["outputs"][1]["error"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(len(result["outputs"]), 1)
+        self.assertEqual(result["outputs"][0]["status"], "failed")
+        self.assertEqual(result["outputs"][0]["grids_sent"], 2)
+        self.assertIn("model failed", result["outputs"][0]["error"])
+
+    @patch("model_client.bench.preprocess_video")
+    @patch("model_client.bench._resolve_video_path")
+    def test_process_task_fails_each_prompt_when_no_grids(
+        self,
+        resolve_video_path: Mock,
+        preprocess_video: Mock,
+    ) -> None:
+        resolve_video_path.return_value = Path("videos/v1.mp4")
+        preprocess_video.return_value = _preprocess_result([])
+        model_client = _model_client([])
+
+        result = process_task(
+            {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
+            model_client,
+            Path("videos"),
+            True,
+            1.0,
+            384,
+            5.0,
+            4,
+            4,
+            8,
+            [TEST_PROMPT],
+            False,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(len(result["outputs"]), 1)
+        self.assertEqual(result["outputs"][0]["grids_sent"], 0)
+        model_client.generate_from_frame_grids.assert_not_called()
 
     def test_write_report_uses_vlm_output_subdir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -200,7 +234,7 @@ def _model_client(responses: list[str]) -> Mock:
         temperature=0.7,
         max_tokens=512,
     )
-    client.generate_from_frame_grid_base64.side_effect = responses
+    client.generate_from_frame_grids.side_effect = responses
     return client
 
 
