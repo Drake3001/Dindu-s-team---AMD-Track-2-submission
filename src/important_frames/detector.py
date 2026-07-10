@@ -33,10 +33,18 @@ DEFAULT_ALPHA: float = 0.01
 background model that ignores gradual motion.  At 0.01 the half-life is
 ~69 frames (~2.3 s at 30 fps), so only abrupt departures break through."""
 
-DEFAULT_THRESHOLD: float = 20.0
-"""Mean absolute pixel-difference threshold (0–255 scale).  Everyday
-motion (arm waves, walking) produces MAD ≈ 5–10; sudden events (crashes,
-explosions) produce 20–50+.  20.0 sits cleanly between the two."""
+DEFAULT_THRESHOLD: float = 10.0
+"""Base pixel-difference threshold (0–255 scale) for the 98th percentile.
+If at least 2% of the frame deviates from the EMA by this amount + the
+adaptive baseline, it is flagged as important."""
+
+DEFAULT_DIFF_ALPHA: float = 0.05
+"""EMA smoothing factor for the difference score itself. Used to track
+the 'normal' amount of chaos in the scene (e.g. constant traffic)."""
+
+DEFAULT_DIFF_MULTIPLIER: float = 1.5
+"""Multiplier for the difference baseline. A frame is flagged if its
+difference exceeds: `(baseline_diff * multiplier) + base_threshold`."""
 
 DEFAULT_MAX_DIM: int = 128
 """Longest-edge cap used when downscaling greyscale frames for the EMA
@@ -126,6 +134,8 @@ def detect_important_frames(
     threshold: float = DEFAULT_THRESHOLD,
     max_dim: int = DEFAULT_MAX_DIM,
     padding: int = DEFAULT_PADDING,
+    diff_alpha: float = DEFAULT_DIFF_ALPHA,
+    diff_multiplier: float = DEFAULT_DIFF_MULTIPLIER,
 ) -> DetectionResult:
     """Scan every frame of *video_path* and return the important ones.
 
@@ -137,8 +147,8 @@ def detect_important_frames(
         EMA smoothing factor (0 < α ≤ 1).  Lower values make the EMA
         slower to adapt, so brief bursts of change are more visible.
     threshold:
-        Minimum mean absolute difference (0–255) between a frame and the
-        current EMA to consider the frame *important*.
+        Minimum base difference (0–255) at the 98th percentile between a
+        frame and the current EMA to consider the frame *important*.
     max_dim:
         Longest edge to downscale greyscale frames to before comparison.
     padding:
@@ -146,6 +156,10 @@ def detect_important_frames(
         threshold-crossing frame.  Compensates for the EMA's asymptotic
         lag — e.g. a car crash is captured from approach through
         aftermath.  Set to 0 to disable.
+    diff_alpha:
+        Smoothing factor for tracking the baseline difference score.
+    diff_multiplier:
+        Multiplier for the baseline difference to form the dynamic threshold.
 
     Returns
     -------
@@ -171,6 +185,7 @@ def detect_important_frames(
         total: int = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         ema: np.ndarray | None = None
+        ema_diff: float = 0.0
         important: list[int] = []
 
         frame_idx = 0
@@ -185,13 +200,19 @@ def detect_important_frames(
             if ema is None:
                 # First frame always counts as important and seeds the EMA.
                 ema = small.copy()
+                ema_diff = 0.0
                 important.append(frame_idx)
             else:
-                diff = float(np.mean(np.abs(small - ema)))
-                if diff >= threshold:
+                diff = float(np.percentile(np.abs(small - ema), 98))
+                
+                # Adaptive threshold logic
+                dynamic_threshold = (ema_diff * diff_multiplier) + threshold
+                if diff >= dynamic_threshold:
                     important.append(frame_idx)
-                # Always update the EMA so it tracks gradual changes.
+                
+                # Always update the EMAs so they track gradual/normal changes.
                 ema = alpha * small + (1.0 - alpha) * ema
+                ema_diff = diff_alpha * diff + (1.0 - diff_alpha) * ema_diff
 
             frame_idx += 1
     finally:

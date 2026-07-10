@@ -19,6 +19,8 @@ from .detector import (
     DEFAULT_MAX_DIM,
     DEFAULT_PADDING,
     DEFAULT_THRESHOLD,
+    DEFAULT_DIFF_ALPHA,
+    DEFAULT_DIFF_MULTIPLIER,
     detect_important_frames,
 )
 
@@ -30,6 +32,8 @@ def get_important_frames(
     threshold: float = DEFAULT_THRESHOLD,
     max_dim: int = DEFAULT_MAX_DIM,
     padding: int = DEFAULT_PADDING,
+    diff_alpha: float = DEFAULT_DIFF_ALPHA,
+    diff_multiplier: float = DEFAULT_DIFF_MULTIPLIER,
 ) -> np.ndarray:
     """Return a 1-D numpy array of important frame indices for *video_path*.
 
@@ -49,6 +53,10 @@ def get_important_frames(
         Longest-edge cap for greyscale downscaling.
     padding:
         Extra context frames on each side of every threshold crossing.
+    diff_alpha:
+        Alpha for the frame-to-frame difference EMA.
+    diff_multiplier:
+        Multiplier for the thresholding logic.
 
     Returns
     -------
@@ -61,5 +69,7 @@ def get_important_frames(
         threshold=threshold,
         max_dim=max_dim,
         padding=padding,
+        diff_alpha=diff_alpha,
+        diff_multiplier=diff_multiplier,
     )
     return result.important_frames
