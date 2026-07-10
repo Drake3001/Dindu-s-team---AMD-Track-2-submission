@@ -28,22 +28,24 @@ from .types import DetectionResult, ImportantFramesError
 log = logging.getLogger(__name__)
 
 # ── defaults ────────────────────────────────────────────────────────────
-DEFAULT_ALPHA: float = 0.05
-"""EMA smoothing factor.  Lower → slower adaptation, more sensitive to
-sudden changes.  Typical range: 0.01 – 0.2."""
+DEFAULT_ALPHA: float = 0.01
+"""EMA smoothing factor.  Lower → slower adaptation, keeps a stable
+background model that ignores gradual motion.  At 0.01 the half-life is
+~69 frames (~2.3 s at 30 fps), so only abrupt departures break through."""
 
-DEFAULT_THRESHOLD: float = 8.0
-"""Mean absolute pixel-difference threshold (0–255 scale).  Frames whose
-deviation from the EMA exceeds this value are considered important."""
+DEFAULT_THRESHOLD: float = 20.0
+"""Mean absolute pixel-difference threshold (0–255 scale).  Everyday
+motion (arm waves, walking) produces MAD ≈ 5–10; sudden events (crashes,
+explosions) produce 20–50+.  20.0 sits cleanly between the two."""
 
 DEFAULT_MAX_DIM: int = 128
 """Longest-edge cap used when downscaling greyscale frames for the EMA
 comparison.  Smaller = faster but less spatial detail."""
 
-DEFAULT_PADDING: int = 5
-"""Number of extra frames to include on each side of every
-threshold-crossing frame.  Compensates for the EMA's asymptotic lag so
-that the lead-up and aftermath of an event are fully captured."""
+DEFAULT_PADDING: int = 15
+"""Number of extra context frames on each side of every threshold
+crossing.  At 30 fps this gives ±500 ms — enough to capture the
+approach and aftermath of an event despite the EMA's asymptotic lag."""
 
 
 # ── helpers ─────────────────────────────────────────────────────────────
