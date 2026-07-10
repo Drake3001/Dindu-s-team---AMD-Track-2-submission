@@ -67,6 +67,7 @@ class ModelClientRequestTests(unittest.TestCase):
             api_key="secret",
             base_url="https://openrouter.ai/api/v1",
             timeout=60.0,
+            max_retries=2,
         )
         sdk_client.with_options.assert_called_once_with(timeout=60.0)
         sdk_client.chat.completions.create.assert_called_once_with(
@@ -96,6 +97,7 @@ class ModelClientRequestTests(unittest.TestCase):
             api_key="secret",
             base_url="https://api.fireworks.ai/inference/v1",
             timeout=60.0,
+            max_retries=2,
         )
         sdk_client.chat.completions.create.assert_called_once_with(
             model="accounts/fireworks/models/test",

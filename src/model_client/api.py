@@ -1,6 +1,6 @@
 from typing import Any
 
-from model_client.client import ModelClient
+from model_client.client import AsyncModelClient, ModelClient
 from model_client.config import load_model_config
 from model_client.messages import DEFAULT_IMAGE_MIME_TYPE
 
@@ -25,6 +25,28 @@ def create_model_client(
         max_tokens=max_tokens,
     )
     return ModelClient(config)
+
+
+def create_async_model_client(
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> AsyncModelClient:
+    """Create an async model client from explicit overrides and environment config."""
+    config = load_model_config(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return AsyncModelClient(config)
 
 
 def chat(

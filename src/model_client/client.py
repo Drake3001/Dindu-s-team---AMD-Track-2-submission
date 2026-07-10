@@ -1,6 +1,6 @@
 from typing import Any
 
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAI, OpenAIError
 import structlog
 
 from model_client.config import ModelConfig
@@ -14,6 +14,8 @@ from model_client.types import ModelRequestError, ModelResponseError
 
 log = structlog.get_logger(__name__)
 
+DEFAULT_MAX_RETRIES = 2
+
 
 class ModelClient:
     """Small wrapper around the OpenAI SDK for configured model providers."""
@@ -24,6 +26,7 @@ class ModelClient:
             api_key=config.api_key,
             base_url=config.base_url,
             timeout=config.timeout_seconds,
+            max_retries=DEFAULT_MAX_RETRIES,
         )
 
     @property
@@ -149,6 +152,108 @@ class ModelClient:
     ) -> str:
         """Generate text from one or more base64 grid images in a single message."""
         return self.chat(
+            build_frame_grids_messages(
+                grids_base64,
+                system_prompt,
+                user_prompt,
+                grids_meta=grids_meta,
+                image_mime_type=image_mime_type,
+            ),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+
+class AsyncModelClient:
+    """Async wrapper around the OpenAI SDK for configured model providers."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        self.config = config
+        self._client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=config.timeout_seconds,
+            max_retries=DEFAULT_MAX_RETRIES,
+        )
+
+    @property
+    def chat_completions_url(self) -> str:
+        return f"{self.config.base_url}/chat/completions"
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Send chat messages to the configured model and return the assistant text."""
+        if not messages:
+            raise ModelRequestError("messages must contain at least one message")
+
+        resolved_temperature = self.config.temperature if temperature is None else temperature
+        resolved_max_tokens = self.config.max_tokens if max_tokens is None else max_tokens
+        timeout = self.config.timeout_seconds if timeout_seconds is None else timeout_seconds
+
+        log.info(
+            "model_request_started",
+            provider=self.config.provider,
+            model=self.config.model,
+            url=self.chat_completions_url,
+        )
+
+        try:
+            response = await self._client.with_options(timeout=timeout).chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                temperature=resolved_temperature,
+                max_tokens=resolved_max_tokens,
+                stream=False,
+            )
+        except OpenAIError as error:
+            raise ModelRequestError(f"Model API request failed: {error}") from error
+
+        content = _extract_message_content(response)
+        log.info(
+            "model_request_completed",
+            provider=self.config.provider,
+            model=self.config.model,
+        )
+        return content
+
+    async def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from a system prompt and a user prompt."""
+        return await self.chat(
+            build_text_messages(system_prompt, user_prompt),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def generate_from_frame_grids(
+        self,
+        grids_base64: list[str],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        grids_meta: list[dict[str, int]],
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from one or more base64 grid images in a single message."""
+        return await self.chat(
             build_frame_grids_messages(
                 grids_base64,
                 system_prompt,

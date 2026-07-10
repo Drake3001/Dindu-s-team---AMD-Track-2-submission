@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import json
 import time
@@ -22,7 +23,7 @@ import structlog
 
 from file_io.api import configure_logging, load_input
 from file_io.download import download_for_task, expected_video_path
-from model_client.api import create_model_client
+from model_client.api import create_async_model_client, create_model_client
 from model_client.config import ModelConfig
 from model_client.prompts import Prompt, load_prompts
 from model_client.types import ModelRequestError
@@ -36,6 +37,7 @@ from preprocessing.preprocessing import (
     preprocess_video,
 )
 from preprocessing.types import PreprocessingError
+from workflow.async_pipeline import PipelineConfig, parallelism_params, run_bench_tasks
 
 log = structlog.get_logger(__name__)
 
@@ -263,6 +265,78 @@ def process_task(
     }
 
 
+def _handle_bench_task_error(task: dict, error: Exception, model_config: ModelConfig) -> dict:
+    task_id = task.get("task_id", "unknown")
+    log.error("model_task_failed", task_id=task_id, error=str(error))
+    return {
+        "task_id": task_id,
+        "video_url": task.get("video_url"),
+        "model": _model_info(model_config),
+        "status": "failed",
+        "error": str(error),
+    }
+
+
+def _log_completed_tasks(
+    run_results: list[dict],
+    *,
+    run_idx: int,
+    runs: int,
+) -> None:
+    for result in run_results:
+        status = result.get("status")
+        if status in {"ok", "partial"}:
+            timings = result.get("timings_s", {})
+            counts = result.get("counts", {})
+            log.info(
+                "model_task_complete",
+                run=run_idx + 1,
+                runs=runs,
+                task_id=result.get("task_id"),
+                status=status,
+                total_s=timings.get("total"),
+                grids=counts.get("grids"),
+                model_requests=counts.get("model_requests"),
+            )
+
+
+async def _run_parallel_bench(
+    task_list: list[dict],
+    *,
+    videos_path: Path,
+    skip_download: bool,
+    prompts: list[Prompt],
+    include_responses: bool,
+    preprocess_kwargs: dict,
+    pipeline_config: PipelineConfig,
+    model_config: ModelConfig,
+) -> list[dict]:
+    model_client = create_async_model_client(
+        provider=model_config.provider,
+        api_key=model_config.api_key,
+        model=model_config.model,
+        base_url=model_config.base_url,
+        timeout_seconds=model_config.timeout_seconds,
+        temperature=model_config.temperature,
+        max_tokens=model_config.max_tokens,
+    )
+
+    def on_error(task: dict, error: Exception) -> dict:
+        return _handle_bench_task_error(task, error, model_config)
+
+    return await run_bench_tasks(
+        task_list,
+        model_client=model_client,
+        videos_dir=videos_path,
+        skip_download=skip_download,
+        prompts=prompts,
+        include_responses=include_responses,
+        preprocess_kwargs=preprocess_kwargs,
+        config=pipeline_config,
+        on_error=on_error,
+    )
+
+
 def main(
     tasks: str = str(DEFAULT_TASKS_PATH),
     videos_dir: str = str(DEFAULT_VIDEOS_DIR),
@@ -280,6 +354,10 @@ def main(
     temperature: float | None = None,
     max_tokens: int | None = None,
     timeout_seconds: float | None = None,
+    sequential: bool = False,
+    max_download_workers: int = 2,
+    max_preprocess_workers: int | None = None,
+    max_inference_workers: int = 3,
 ) -> None:
     """Benchmark preprocessing plus model calls for all tasks in a JSON file."""
     configure_logging()
@@ -291,12 +369,20 @@ def main(
     videos_path = Path(videos_dir)
     out_path = Path(output_dir)
     task_list = load_input(tasks_path)
-    model_client = create_model_client(
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout_seconds=timeout_seconds,
-    )
     prompts = load_prompts([prompt] if prompt else None)
+    pipeline_config = PipelineConfig(
+        max_download_workers=max_download_workers,
+        max_preprocess_workers=max_preprocess_workers,
+        max_inference_workers=max_inference_workers,
+    )
+    preprocess_kwargs = {
+        "fps": fps,
+        "max_dim": max_dim,
+        "prune_threshold": prune_threshold,
+        "grid_cols": grid_cols,
+        "grid_rows": grid_rows,
+        "max_frames": max_frames,
+    }
 
     params = {
         "tasks": str(tasks_path),
@@ -315,58 +401,67 @@ def main(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout_seconds": timeout_seconds,
+        "sequential": sequential,
+        "parallelism": parallelism_params(pipeline_config, len(task_list)),
     }
 
     log.info("model_benchmark_started", **params, num_tasks=len(task_list))
 
     all_runs: list[dict] = []
     for run_idx in range(runs):
-        run_results: list[dict] = []
-        for task in task_list:
-            try:
-                result = process_task(
-                    task,
-                    model_client,
-                    videos_path,
-                    skip_download,
-                    fps,
-                    max_dim,
-                    prune_threshold,
-                    grid_cols,
-                    grid_rows,
-                    max_frames,
-                    prompts,
-                    include_responses,
-                )
-            except (
-                PreprocessingError,
-                ModelRequestError,
-                KeyError,
-                FileNotFoundError,
-                OSError,
-            ) as exc:
-                result = {
-                    "task_id": task.get("task_id", "unknown"),
-                    "video_url": task.get("video_url"),
-                    "model": _model_info(model_client.config),
-                    "status": "failed",
-                    "error": str(exc),
-                }
-                log.error("model_task_failed", task_id=result["task_id"], error=str(exc))
+        if sequential:
+            model_client = create_model_client(
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+            )
+            run_results: list[dict] = []
+            for task in task_list:
+                try:
+                    result = process_task(
+                        task,
+                        model_client,
+                        videos_path,
+                        skip_download,
+                        fps,
+                        max_dim,
+                        prune_threshold,
+                        grid_cols,
+                        grid_rows,
+                        max_frames,
+                        prompts,
+                        include_responses,
+                    )
+                except (
+                    PreprocessingError,
+                    ModelRequestError,
+                    KeyError,
+                    FileNotFoundError,
+                    OSError,
+                ) as exc:
+                    result = _handle_bench_task_error(task, exc, model_client.config)
 
-            run_results.append(result)
-            status = result.get("status")
-            if status in {"ok", "partial"}:
-                log.info(
-                    "model_task_complete",
-                    run=run_idx + 1,
-                    runs=runs,
-                    task_id=result["task_id"],
-                    status=status,
-                    total_s=result["timings_s"]["total"],
-                    grids=result["counts"]["grids"],
-                    model_requests=result["counts"]["model_requests"],
+                run_results.append(result)
+            _log_completed_tasks(run_results, run_idx=run_idx, runs=runs)
+        else:
+            sync_model_client = create_model_client(
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+            )
+            run_results = asyncio.run(
+                _run_parallel_bench(
+                    task_list,
+                    videos_path=videos_path,
+                    skip_download=skip_download,
+                    prompts=prompts,
+                    include_responses=include_responses,
+                    preprocess_kwargs=preprocess_kwargs,
+                    pipeline_config=pipeline_config,
+                    model_config=sync_model_client.config,
                 )
+            )
+            _log_completed_tasks(run_results, run_idx=run_idx, runs=runs)
 
         all_runs.append({"run": run_idx + 1, "tasks": run_results})
 

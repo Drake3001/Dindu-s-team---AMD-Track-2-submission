@@ -126,7 +126,7 @@ def sample_and_downscale(
 
     frames: list[Frame] = []
     try:
-        if step > 15 and metadata.frame_count > 0:
+        if step > 1 and metadata.frame_count > 0:
             target_indices = []
             curr_idx = 0
             while curr_idx < metadata.frame_count:
