@@ -67,6 +67,13 @@ def extract_smart_grids(
     state = DetectorState()
     important_frames_list: list[Frame] = []
     unimportant_frames_list: list[Frame] = []
+    
+    # Padding logic for streaming:
+    # We want +/- 15 frames of padding around every trigger.
+    padding = 15
+    past_buffer: list[Frame] = [] # Holds the last 'padding' frames
+    save_countdown = 0            # How many future frames to save unconditionally
+    seen_important_indices = set() # To prevent duplicates
 
     frame_idx = 0
     try:
@@ -76,19 +83,40 @@ def extract_smart_grids(
                 break
                 
             is_important = state.process_frame(img)
-            
             ts = frame_idx / native_fps
+            current_frame = Frame(index=frame_idx, timestamp=ts, image=_resize_max_dim(img, max_dim))
+            
             if is_important:
-                important_frames_list.append(
-                    Frame(index=frame_idx, timestamp=ts, image=_resize_max_dim(img, max_dim))
-                )
+                # If we just triggered, save all frames in the past buffer
+                for pf in past_buffer:
+                    if pf.index not in seen_important_indices:
+                        important_frames_list.append(pf)
+                        seen_important_indices.add(pf.index)
+                
+                # Save the current frame
+                if current_frame.index not in seen_important_indices:
+                    important_frames_list.append(current_frame)
+                    seen_important_indices.add(current_frame.index)
+                
+                # Tell the loop to save the NEXT `padding` frames unconditionally
+                save_countdown = padding
+                
+            elif save_countdown > 0:
+                # We didn't trigger, but we are inside the +padding window of a recent trigger
+                if current_frame.index not in seen_important_indices:
+                    important_frames_list.append(current_frame)
+                    seen_important_indices.add(current_frame.index)
+                save_countdown -= 1
+                
             else:
-                # To save memory during the loop, we randomly drop a vast majority 
-                # of unimportant frames, because we only need ~4 of them for context anyway.
+                # Completely unimportant frame
                 if random.random() < 0.1:
-                    unimportant_frames_list.append(
-                        Frame(index=frame_idx, timestamp=ts, image=_resize_max_dim(img, max_dim))
-                    )
+                    unimportant_frames_list.append(current_frame)
+                    
+            # Maintain the sliding window for past padding
+            past_buffer.append(current_frame)
+            if len(past_buffer) > padding:
+                past_buffer.pop(0)
                     
             frame_idx += 1
     finally:
