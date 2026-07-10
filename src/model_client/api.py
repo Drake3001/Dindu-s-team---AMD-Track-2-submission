@@ -140,11 +140,12 @@ def generate_from_images_base64(
     )
 
 
-def generate_from_frame_grid_base64(
-    frame_grid_base64: str,
+def generate_from_frame_grids(
+    grids_base64: list[str],
     system_prompt: str,
     user_prompt: str,
     *,
+    grids_meta: list[dict[str, int]],
     image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
     provider: str | None = None,
     api_key: str | None = None,
@@ -154,7 +155,7 @@ def generate_from_frame_grid_base64(
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> str:
-    """Generate text from one base64 image containing a grid of video frames."""
+    """Generate text from one or more base64 grid images in a single message."""
     client = create_model_client(
         provider=provider,
         api_key=api_key,
@@ -164,9 +165,10 @@ def generate_from_frame_grid_base64(
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    return client.generate_from_frame_grid_base64(
-        frame_grid_base64,
+    return client.generate_from_frame_grids(
+        grids_base64,
         system_prompt,
         user_prompt,
+        grids_meta=grids_meta,
         image_mime_type=image_mime_type,
     )

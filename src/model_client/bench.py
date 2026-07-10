@@ -42,7 +42,7 @@ log = structlog.get_logger(__name__)
 DEFAULT_TASKS_PATH = Path("input/tasks.json")
 DEFAULT_VIDEOS_DIR = Path("videos")
 DEFAULT_OUTPUT_DIR = Path("output")
-BENCH_SUBDIR = "model_client"
+BENCH_SUBDIR = "vlm_output"
 RESPONSE_PREVIEW_CHARS = 240
 
 
@@ -80,22 +80,57 @@ def _model_info(config: ModelConfig) -> dict:
 
 
 def _output_record(
-    grid_index: int,
     prompt_name: str,
     response: str,
     elapsed_s: float,
     include_response: bool,
+    grids_sent: int,
 ) -> dict:
+    valid_json = False
+    try:
+        json.loads(response)
+        valid_json = True
+    except json.JSONDecodeError:
+        pass
+
     record = {
-        "grid_index": grid_index,
         "prompt": prompt_name,
         "elapsed_s": elapsed_s,
+        "status": "ok",
         "response_chars": len(response),
         "response_preview": response[:RESPONSE_PREVIEW_CHARS],
+        "valid_json": valid_json,
+        "grids_sent": grids_sent,
     }
     if include_response:
         record["response"] = response
     return record
+
+
+def _failed_output_record(
+    prompt_name: str,
+    elapsed_s: float,
+    error: Exception,
+    grids_sent: int,
+) -> dict:
+    return {
+        "prompt": prompt_name,
+        "elapsed_s": elapsed_s,
+        "status": "failed",
+        "error": str(error),
+        "grids_sent": grids_sent,
+    }
+
+
+def _task_status_from_outputs(outputs: list[dict]) -> str:
+    if not outputs:
+        return "failed"
+    failures = sum(1 for output in outputs if output.get("status") == "failed")
+    if failures == 0:
+        return "ok"
+    if failures == len(outputs):
+        return "failed"
+    return "partial"
 
 
 def process_task(
@@ -130,25 +165,67 @@ def process_task(
     )
     t2 = time.perf_counter()
 
+    grids_b64 = [grid.b64 for grid in preprocessed.grids]
+    grids_meta = [
+        {
+            "frame_count": grid.frame_count,
+            "cols": grid.cols,
+            "rows": grid.rows,
+            "empty_cells": grid.empty_cells,
+            "width_px": grid.width_px,
+            "height_px": grid.height_px,
+        }
+        for grid in preprocessed.grids
+    ]
+    grids_sent = len(grids_b64)
+
     outputs = []
-    for grid_index, grid_b64 in enumerate(preprocessed.grids_b64):
-        for prompt in prompts:
-            call_start = time.perf_counter()
-            response = model_client.generate_from_frame_grid_base64(
-                grid_b64,
+    for prompt in prompts:
+        call_start = time.perf_counter()
+        if not grids_b64:
+            elapsed_s = round(time.perf_counter() - call_start, 4)
+            error = ModelRequestError("No grid images available for model request")
+            outputs.append(
+                _failed_output_record(prompt.name, elapsed_s, error, grids_sent)
+            )
+            log.error(
+                "model_grid_request_failed",
+                task_id=task_id,
+                prompt=prompt.name,
+                error=str(error),
+            )
+            continue
+
+        try:
+            response = model_client.generate_from_frame_grids(
+                grids_b64,
                 prompt.system,
                 prompt.user,
+                grids_meta=grids_meta,
             )
+        except ModelRequestError as exc:
             elapsed_s = round(time.perf_counter() - call_start, 4)
             outputs.append(
-                _output_record(
-                    grid_index,
-                    prompt.name,
-                    response,
-                    elapsed_s,
-                    include_responses,
-                )
+                _failed_output_record(prompt.name, elapsed_s, exc, grids_sent)
             )
+            log.error(
+                "model_grid_request_failed",
+                task_id=task_id,
+                prompt=prompt.name,
+                error=str(exc),
+            )
+            continue
+
+        elapsed_s = round(time.perf_counter() - call_start, 4)
+        outputs.append(
+            _output_record(
+                prompt.name,
+                response,
+                elapsed_s,
+                include_responses,
+                grids_sent,
+            )
+        )
     t3 = time.perf_counter()
 
     gc.collect()
@@ -170,7 +247,7 @@ def process_task(
         "counts": {
             "sampled": preprocessed.sampled_count,
             "post_pruned": preprocessed.post_pruned_count,
-            "grids": len(preprocessed.grids_b64),
+            "grids": len(preprocessed.grids),
             "model_requests": len(outputs),
         },
         "timings_s": {
@@ -182,7 +259,7 @@ def process_task(
         },
         "model": _model_info(model_client.config),
         "outputs": outputs,
-        "status": "ok",
+        "status": _task_status_from_outputs(outputs),
     }
 
 
@@ -261,7 +338,13 @@ def main(
                     prompts,
                     include_responses,
                 )
-            except (PreprocessingError, ModelRequestError, KeyError, FileNotFoundError) as exc:
+            except (
+                PreprocessingError,
+                ModelRequestError,
+                KeyError,
+                FileNotFoundError,
+                OSError,
+            ) as exc:
                 result = {
                     "task_id": task.get("task_id", "unknown"),
                     "video_url": task.get("video_url"),
@@ -272,12 +355,14 @@ def main(
                 log.error("model_task_failed", task_id=result["task_id"], error=str(exc))
 
             run_results.append(result)
-            if result.get("status") == "ok":
+            status = result.get("status")
+            if status in {"ok", "partial"}:
                 log.info(
                     "model_task_complete",
                     run=run_idx + 1,
                     runs=runs,
                     task_id=result["task_id"],
+                    status=status,
                     total_s=result["timings_s"]["total"],
                     grids=result["counts"]["grids"],
                     model_requests=result["counts"]["model_requests"],
