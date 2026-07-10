@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 from typing import Any
 
 import structlog
 
-from file_io.api import configure_logging, load_input, save_output
+from file_io.api import configure_logging, load_input
 from file_io.download import download_for_task
 from model_client import (
     create_model_client,
@@ -19,7 +20,8 @@ log = structlog.get_logger(__name__)
 
 DEFAULT_ANALYSIS_PROMPT = "detailed_chronological"
 DEFAULT_VIDEOS_DIR = "videos"
-DEFAULT_OUTPUT_DIR = "output"
+CONTAINER_INPUT_PATH = Path("/input/tasks.json")
+CONTAINER_OUTPUT_PATH = Path("/output/results.json")
 
 
 def _grid_metadata(video: PreprocessedVideo) -> list[dict[str, int]]:
@@ -49,16 +51,10 @@ def _generate_captions(
     model_client,
     analysis: Any,
     styles: list[str],
-) -> list[dict[str, str]]:
-    captions = []
+) -> dict[str, str]:
+    captions = {}
     for style in styles:
-        caption = generate_caption(model_client, analysis, style)
-        captions.append(
-            {
-                "style": style,
-                "caption": caption,
-            }
-        )
+        captions[style] = generate_caption(model_client, analysis, style)
     return captions
 
 
@@ -87,29 +83,48 @@ def process_task(
 
     return {
         "task_id": task_id,
-        "video_url": video_url,
-        "video_path": str(video_path),
-        "analysis_prompt": analysis_prompt.name,
-        "analysis": analysis,
         "captions": captions,
-        "preprocessing": {
-            "duration_sec": video.duration_sec,
-            "resolution": f"{video.width}x{video.height}",
-            "sampled_count": video.sampled_count,
-            "post_pruned_count": video.post_pruned_count,
-            "num_grids": video.num_grids,
-        },
-        "status": "ok",
     }
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _input_path(project_root: Path) -> Path:
+    if CONTAINER_INPUT_PATH.is_file():
+        return CONTAINER_INPUT_PATH
+    return project_root / "input" / "tasks.json"
+
+
+def _output_path(project_root: Path) -> Path:
+    if CONTAINER_OUTPUT_PATH.parent.is_dir():
+        return CONTAINER_OUTPUT_PATH
+    return project_root / "output" / "results.json"
+
+
+def _empty_captions(task: dict[str, Any]) -> dict[str, str]:
+    try:
+        styles = _task_styles(task)
+    except ValueError:
+        styles = list_caption_styles()
+    return {style: "" for style in styles}
+
+
+def _write_results(results: list[dict[str, Any]], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+        f.write("\n")
 
 
 def main() -> None:
     configure_logging()
 
-    project_root = Path(__file__).resolve().parent.parent
-    input_path = project_root / "input" / "tasks.json"
+    project_root = _project_root()
+    input_path = _input_path(project_root)
     videos_dir = project_root / DEFAULT_VIDEOS_DIR
-    output_dir = project_root / DEFAULT_OUTPUT_DIR
+    output_path = _output_path(project_root)
 
     tasks = load_input(input_path)
     model_client = create_model_client()
@@ -137,14 +152,12 @@ def main() -> None:
         ) as error:
             result = {
                 "task_id": task_id,
-                "video_url": task.get("video_url"),
-                "status": "failed",
-                "error": str(error),
+                "captions": _empty_captions(task),
             }
             log.error("workflow_task_failed", task_id=task_id, error=str(error))
         results.append(result)
 
-    output_path = save_output(results, output_dir, filename_prefix="workflow_results")
+    _write_results(results, output_path)
     print(f"Wrote {len(results)} workflow results to {output_path}")
 
 
