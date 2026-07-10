@@ -77,3 +77,14 @@ uv run bench2 --temperature 0.8 --max_tokens 1000 --timeout_seconds 120 --prompt
 uv run bench2 --prompt concise_factual --skip_download=True --include_responses=True
 uv run bench2 --prompt structured_breakdown --skip_download=True --include_responses=True
 uv run bench2 --prompt detailed_chronological --skip_download=True --include_responses=True
+
+
+
+
+
+Main test case: 
+uv run bench2 --temperature=0 --max_tokens=1024 --prompt detailed_chronological --include_responses=True
+
+uv run bench2 --temperature=0 --max_tokens=1024 --prompt concise_factual --include_responses=True
+
+uv run bench2 --temperature=0 --max_tokens=1024 --prompt structured_breakdown --include_responses=True

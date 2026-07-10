@@ -49,6 +49,7 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertIn("elapsed_s", result["outputs"][0])
         self.assertEqual(result["outputs"][0]["response_chars"], len("first response"))
         self.assertNotIn("response", result["outputs"][0])
+        self.assertIn("valid_json", result["outputs"][0])
         self.assertIn("model_request", result["timings_s"])
 
     @patch("model_client.bench.preprocess_video")
@@ -204,6 +205,19 @@ def _model_client(responses: list[str]) -> Mock:
 
 
 def _preprocess_result(grids_b64: list[str]) -> SimpleNamespace:
+    grids = [
+        SimpleNamespace(
+            b64=b64,
+            frame_count=8,
+            capacity=16,
+            empty_cells=8,
+            cols=4,
+            rows=4,
+            width_px=512,
+            height_px=512,
+        )
+        for b64 in grids_b64
+    ]
     return SimpleNamespace(
         metadata=SimpleNamespace(
             duration_sec=6.0,
@@ -214,5 +228,6 @@ def _preprocess_result(grids_b64: list[str]) -> SimpleNamespace:
         ),
         sampled_count=6,
         post_pruned_count=6,
+        grids=grids,
         grids_b64=grids_b64,
     )

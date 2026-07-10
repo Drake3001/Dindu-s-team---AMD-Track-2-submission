@@ -3,10 +3,29 @@ from typing import Any
 from model_client.types import ModelRequestError
 
 DEFAULT_IMAGE_MIME_TYPE = "image/jpeg"
-FRAME_GRID_PROMPT_PREFIX = (
-    "The attached image is a grid of video frames ordered left-to-right, "
-    "top-to-bottom. Analyze it as a temporal sequence.\n\n"
-)
+
+
+def build_frame_grid_context(
+    *,
+    frame_count: int,
+    cols: int,
+    rows: int,
+    empty_cells: int,
+    width_px: int,
+    height_px: int,
+) -> str:
+    capacity = cols * rows
+    return (
+        "You are given ONE base64-encoded JPEG image. "
+        f"It is a single montage that tiles {frame_count} video frame(s) into a "
+        f"{rows}x{cols} grid (capacity {capacity} cells), read left-to-right then "
+        "top-to-bottom in chronological order. "
+        f"The image is {width_px}x{height_px} pixels. "
+        f"{empty_cells} cell(s) contain no frame and are filled with solid black; "
+        "individual frames may also carry black letterbox bars to preserve aspect "
+        "ratio. Treat any all-black cell or black bar as padding, not as video "
+        "content, and never describe it.\n\n"
+    )
 
 
 def build_text_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
@@ -48,12 +67,26 @@ def build_frame_grid_messages(
     system_prompt: str,
     user_prompt: str,
     *,
+    frame_count: int,
+    cols: int,
+    rows: int,
+    empty_cells: int,
+    width_px: int,
+    height_px: int,
     image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
 ) -> list[dict[str, Any]]:
+    context = build_frame_grid_context(
+        frame_count=frame_count,
+        cols=cols,
+        rows=rows,
+        empty_cells=empty_cells,
+        width_px=width_px,
+        height_px=height_px,
+    )
     return build_image_messages(
         [frame_grid_base64],
         system_prompt,
-        f"{FRAME_GRID_PROMPT_PREFIX}{user_prompt}",
+        f"{context}{user_prompt}",
         image_mime_type=image_mime_type,
     )
 

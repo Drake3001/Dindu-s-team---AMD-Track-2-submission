@@ -6,7 +6,11 @@ from unittest.mock import Mock, patch
 from model_client import generate_from_frame_grid_base64, generate_text
 from model_client.api import create_model_client
 from model_client.config import ModelConfigError, load_model_config
-from model_client.messages import build_frame_grid_messages, build_image_messages
+from model_client.messages import (
+    build_frame_grid_context,
+    build_frame_grid_messages,
+    build_image_messages,
+)
 from model_client.types import ModelRequestError
 
 
@@ -149,6 +153,12 @@ class ModelClientRequestTests(unittest.TestCase):
             "gridbase64",
             "System",
             "Describe the video.",
+            frame_count=10,
+            cols=4,
+            rows=4,
+            empty_cells=6,
+            width_px=512,
+            height_px=512,
             provider="openrouter",
             api_key="secret",
             model="vision/test",
@@ -157,7 +167,8 @@ class ModelClientRequestTests(unittest.TestCase):
         self.assertEqual(result, "grid")
         messages = sdk_client.chat.completions.create.call_args.kwargs["messages"]
         content = messages[1]["content"]
-        self.assertIn("grid of video frames", content[0]["text"])
+        self.assertIn("10 video frame(s)", content[0]["text"])
+        self.assertIn("solid black", content[0]["text"])
         self.assertIn("Describe the video.", content[0]["text"])
         self.assertEqual(
             content[1]["image_url"]["url"],
@@ -182,11 +193,38 @@ class ModelClientMessageTests(unittest.TestCase):
         with self.assertRaisesRegex(ModelRequestError, "images_base64"):
             build_image_messages([], "System", "Describe.")
 
+    def test_build_frame_grid_context_includes_grid_metadata(self) -> None:
+        context = build_frame_grid_context(
+            frame_count=10,
+            cols=4,
+            rows=4,
+            empty_cells=6,
+            width_px=512,
+            height_px=384,
+        )
+
+        self.assertIn("10 video frame(s)", context)
+        self.assertIn("4x4 grid", context)
+        self.assertIn("capacity 16 cells", context)
+        self.assertIn("512x384 pixels", context)
+        self.assertIn("6 cell(s) contain no frame", context)
+        self.assertIn("solid black", context)
+
     def test_build_frame_grid_messages_adds_temporal_instruction(self) -> None:
-        messages = build_frame_grid_messages("gridbase64", "System", "Describe.")
+        messages = build_frame_grid_messages(
+            "gridbase64",
+            "System",
+            "Describe.",
+            frame_count=16,
+            cols=4,
+            rows=4,
+            empty_cells=0,
+            width_px=512,
+            height_px=512,
+        )
         content = messages[1]["content"]
 
-        self.assertIn("grid of video frames", content[0]["text"])
+        self.assertIn("16 video frame(s)", content[0]["text"])
         self.assertIn("Describe.", content[0]["text"])
 
 

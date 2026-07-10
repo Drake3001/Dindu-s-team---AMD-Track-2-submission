@@ -86,6 +86,13 @@ def _output_record(
     elapsed_s: float,
     include_response: bool,
 ) -> dict:
+    valid_json = False
+    try:
+        json.loads(response)
+        valid_json = True
+    except json.JSONDecodeError:
+        pass
+
     record = {
         "grid_index": grid_index,
         "prompt": prompt_name,
@@ -93,6 +100,7 @@ def _output_record(
         "status": "ok",
         "response_chars": len(response),
         "response_preview": response[:RESPONSE_PREVIEW_CHARS],
+        "valid_json": valid_json,
     }
     if include_response:
         record["response"] = response
@@ -158,14 +166,20 @@ def process_task(
     t2 = time.perf_counter()
 
     outputs = []
-    for grid_index, grid_b64 in enumerate(preprocessed.grids_b64):
+    for grid_index, grid in enumerate(preprocessed.grids):
         for prompt in prompts:
             call_start = time.perf_counter()
             try:
                 response = model_client.generate_from_frame_grid_base64(
-                    grid_b64,
+                    grid.b64,
                     prompt.system,
                     prompt.user,
+                    frame_count=grid.frame_count,
+                    cols=grid.cols,
+                    rows=grid.rows,
+                    empty_cells=grid.empty_cells,
+                    width_px=grid.width_px,
+                    height_px=grid.height_px,
                 )
             except ModelRequestError as exc:
                 elapsed_s = round(time.perf_counter() - call_start, 4)
@@ -212,7 +226,7 @@ def process_task(
         "counts": {
             "sampled": preprocessed.sampled_count,
             "post_pruned": preprocessed.post_pruned_count,
-            "grids": len(preprocessed.grids_b64),
+            "grids": len(preprocessed.grids),
             "model_requests": len(outputs),
         },
         "timings_s": {

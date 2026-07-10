@@ -26,6 +26,7 @@ from .preprocessing import (
     preprocess_video,
 )
 from .types import PreprocessingError
+from .vlm_output import GridImage
 
 __all__ = ["PreprocessingError", "PreprocessedVideo", "preprocess"]
 
@@ -39,8 +40,12 @@ class PreprocessedVideo:
     sampled_count: int
     post_pruned_count: int
     num_grids: int
-    grids_b64: List[str]        # base64 JPEG grids, ready to hand to a VLM
+    grids: List[GridImage]
     frame_timestamps: List[float]
+
+    @property
+    def grids_b64(self) -> List[str]:
+        return [grid.b64 for grid in self.grids]
 
 
 def preprocess(
@@ -78,7 +83,7 @@ def preprocess(
         height=result.metadata.height,
         sampled_count=result.sampled_count,
         post_pruned_count=result.post_pruned_count,
-        num_grids=len(result.grids_b64),
-        grids_b64=result.grids_b64,
+        num_grids=len(result.grids),
+        grids=result.grids,
         frame_timestamps=result.frame_timestamps,
     )
