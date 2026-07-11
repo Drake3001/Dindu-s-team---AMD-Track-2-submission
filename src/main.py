@@ -161,46 +161,8 @@ def main(config: str = "config/pipeline.yaml") -> None:
     tasks = load_input(tasks_path)
     results = asyncio.run(_run_workflow(cfg, tasks, project_root))
 
-    for task in tasks:
-        task_id = task["task_id"]
-        video_url = task["video_url"]
-        styles = task.get("styles", [])
-        
-        log.info("processing_task", task_id=task_id)
-
-        # 1. Download Video
-        video_path = download_for_task(task_id, video_url, videos_dir=videos_dir)
-
-        # 2. Extract Grids using Pipeline 2
-        extraction_res = extract_smart_grids(video_path)
-        grids_b64 = extraction_res["grids_b64"]
-        
-        task_result = {
-            "task_id": task_id,
-            "video_url": video_url,
-            "generations": []
-        }
-
-        # 3. Prompt VLM for each style
-        for style in styles:
-            log.info("generating_style", task_id=task_id, style=style)
-            prompt = load_prompt(style)
-            
-            response = generate_from_images_base64(
-                images_base64=grids_b64,
-                system_prompt=prompt.system,
-                user_prompt=prompt.user
-            )
-            
-            task_result["generations"].append({
-                "style": style,
-                "response": response
-            })
-            
-        results.append(task_result)
-
-    output_path = save_output(results, output_dir)
-    print(f"Wrote {len(results)} task results to {output_path}")
+    _write_results(results, output_path)
+    log.info("workflow_complete", task_count=len(results), output_path=str(output_path))
 
 def cli() -> None:
     fire.Fire(main)

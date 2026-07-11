@@ -16,6 +16,7 @@ from model_client.client import AsyncModelClient
 from model_client.prompts import Prompt
 from model_client.response_parsing import parse_json_from_model_response
 from model_client.types import ModelRequestError
+from pipeline_2.grid_extractor import extract_smart_grids
 from preprocessing.preprocessing import preprocess_video
 from preprocessing.types import PreprocessingError
 
@@ -60,10 +61,52 @@ def _resolve_video_path_sync(
 
 def _preprocess_worker(args: tuple[str, str, dict[str, Any]]) -> dict[str, Any]:
     task_id, video_path, preprocess_kwargs = args
+    kwargs = dict(preprocess_kwargs)
+    strategy = kwargs.pop("strategy", "smart")
+
+    if strategy == "smart":
+        result = extract_smart_grids(
+            video_path,
+            max_frames=kwargs.get("max_frames", 32),
+            context_frames=kwargs.get("context_frames", 4),
+            max_dim=kwargs.get("max_dim", 512),
+            grid_cols=kwargs.get("grid_cols", 4),
+            grid_rows=kwargs.get("grid_rows", 4),
+        )
+        meta = result["metadata"]
+        grids = result["grids_b64"]
+        return {
+            "task_id": task_id,
+            "video_path": str(video_path),
+            "metadata": {
+                "duration_sec": meta.duration_sec,
+                "fps": meta.fps,
+                "frame_count": meta.frame_count,
+                "width": meta.width,
+                "height": meta.height,
+            },
+            "grids_b64": [grid.b64 for grid in grids],
+            "grids_meta": [
+                {
+                    "frame_count": grid.frame_count,
+                    "cols": grid.cols,
+                    "rows": grid.rows,
+                    "empty_cells": grid.empty_cells,
+                    "width_px": grid.width_px,
+                    "height_px": grid.height_px,
+                }
+                for grid in grids
+            ],
+            "sampled_count": result["sampled_count"],
+            "post_pruned_count": result["sampled_count"],
+            "frame_timestamps": result["frame_timestamps"],
+            "grids_count": len(grids),
+        }
+
     result = preprocess_video(
         task_id=task_id,
         video_path=Path(video_path),
-        **preprocess_kwargs,
+        **kwargs,
     )
     meta = result.metadata
     return {

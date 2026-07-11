@@ -10,6 +10,8 @@ output:
   path: output/tasks.json
 
 pipeline:
+  strategy: smart
+  context_frames: 4
   fps: 1.0
   max_dim: 512
   prune_threshold: 5.0

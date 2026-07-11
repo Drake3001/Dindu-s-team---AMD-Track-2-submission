@@ -26,6 +26,9 @@ from workflow.async_pipeline import PipelineConfig
 
 CONTAINER_CONFIG_PATH = Path("/config/pipeline.yaml")
 
+DEFAULT_STRATEGY = "smart"
+DEFAULT_CONTEXT_FRAMES = 4
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "input": {
         "tasks": "input/tasks.json",
@@ -36,6 +39,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "path": "output/results.json",
     },
     "pipeline": {
+        "strategy": DEFAULT_STRATEGY,
+        "context_frames": DEFAULT_CONTEXT_FRAMES,
         "fps": DEFAULT_TARGET_FPS,
         "max_dim": DEFAULT_MAX_DIM,
         "prune_threshold": DEFAULT_PRUNE_THRESHOLD,
@@ -94,6 +99,8 @@ class ModelStageConfig:
 
 @dataclass(frozen=True)
 class PipelineStageConfig:
+    strategy: str
+    context_frames: int
     fps: float
     max_dim: int
     prune_threshold: float
@@ -105,6 +112,8 @@ class PipelineStageConfig:
     @property
     def preprocess_kwargs(self) -> dict[str, Any]:
         return {
+            "strategy": self.strategy,
+            "context_frames": self.context_frames,
             "fps": self.fps,
             "max_dim": self.max_dim,
             "prune_threshold": self.prune_threshold,
@@ -203,6 +212,22 @@ def _read_bool(value: Any, field: str, section: str) -> bool:
     if not isinstance(value, bool):
         raise ConfigError(f"{section}.{field} must be a boolean")
     return value
+
+
+def _read_str(value: Any, field: str, section: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{section}.{field} must be a non-empty string")
+    return value.strip()
+
+
+def _read_strategy(value: Any, field: str, section: str) -> str:
+    strategy = _read_str(value, field, section)
+    allowed = {"smart", "naive"}
+    if strategy not in allowed:
+        raise ConfigError(
+            f"{section}.{field} must be one of: {', '.join(sorted(allowed))}"
+        )
+    return strategy
 
 
 def _read_path(value: Any, field: str, section: str, base_dir: Path) -> Path:
@@ -377,6 +402,12 @@ def load_pipeline_config(path: Path, *, project_root: Path | None = None) -> App
             path=_read_path(output_data.get("path"), "path", "output", base_dir),
         ),
         pipeline=PipelineStageConfig(
+            strategy=_read_strategy(
+                pipeline_data.get("strategy"), "strategy", "pipeline"
+            ),
+            context_frames=_read_int(
+                pipeline_data.get("context_frames"), "context_frames", "pipeline"
+            ),
             fps=_read_float(pipeline_data.get("fps"), "fps", "pipeline"),
             max_dim=_read_int(pipeline_data.get("max_dim"), "max_dim", "pipeline"),
             prune_threshold=_read_float(

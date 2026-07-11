@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 # System lib required by opencv-python-headless (libgthread from glib)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libglib2.0-0 \
+    && apt-get install -y --no-install-recommends libglib2.0-0 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

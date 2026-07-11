@@ -1,12 +1,14 @@
 input:
   tasks: input/test.json
   videos_dir: videos
-  skip_download: False
+  skip_download: True
 
 output:
   path: output/tasks.json
 
 pipeline:
+  strategy: smart
+  context_frames: 4
   fps: 1.0
   max_dim: 512
   prune_threshold: 5.0
