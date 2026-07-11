@@ -25,6 +25,24 @@ def build_frame_grids_context(grids_meta: list[dict[str, int]], *, image_count: 
     return "\n".join(lines) + "\n\n"
 
 
+def build_individual_frames_context(
+    frame_timestamps: list[float],
+    *,
+    image_count: int,
+) -> str:
+    lines = [
+        f"You are given {image_count} base64-encoded JPEG image(s), in chronological order "
+        "(image 1 first). Each image is one full video frame sampled from the same video.",
+    ]
+    for index, timestamp in enumerate(frame_timestamps, start=1):
+        lines.append(f"Image {index}: video frame at {timestamp:.1f} seconds.")
+    lines.append(
+        "Treat each image as a distinct moment in the timeline. "
+        "Do not infer content from image ordering beyond chronology."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 def build_text_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": system_prompt},
@@ -75,6 +93,31 @@ def build_frame_grids_messages(
     context = build_frame_grids_context(grids_meta, image_count=len(grids_base64))
     return build_image_messages(
         grids_base64,
+        system_prompt,
+        f"{context}{user_prompt}",
+        image_mime_type=image_mime_type,
+    )
+
+
+def build_individual_frames_messages(
+    frames_base64: list[str],
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    frame_timestamps: list[float],
+    image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+) -> list[dict[str, Any]]:
+    if len(frames_base64) != len(frame_timestamps):
+        raise ModelRequestError("frames_base64 and frame_timestamps must have the same length")
+    if not frames_base64:
+        raise ModelRequestError("frames_base64 must contain at least one image")
+
+    context = build_individual_frames_context(
+        frame_timestamps,
+        image_count=len(frames_base64),
+    )
+    return build_image_messages(
+        frames_base64,
         system_prompt,
         f"{context}{user_prompt}",
         image_mime_type=image_mime_type,

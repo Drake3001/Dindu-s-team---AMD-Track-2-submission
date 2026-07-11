@@ -22,7 +22,7 @@ import numpy as np
 import structlog
 
 from .pruning_strat import AbsDiffPruner, FramePruner
-from .vlm_output import GridImage, frames_to_grid_b64
+from .vlm_output import GridImage, frames_to_b64_list, frames_to_grid_b64
 
 log = structlog.get_logger(__name__)
 
@@ -32,6 +32,7 @@ DEFAULT_TARGET_FPS = 1.0
 DEFAULT_PRUNE_THRESHOLD = 5.0
 DEFAULT_GRID_COLS = 4
 DEFAULT_GRID_ROWS = 4
+DEFAULT_UPLOAD_MODE = "grid"
 
 from .types import Frame, PreprocessingError, VideoMetadata
 
@@ -45,6 +46,7 @@ class PreprocessResult:
     post_pruned_count: int
     grids: List[GridImage]
     frame_timestamps: List[float]
+    frames_b64: List[str] | None = None
 
     @property
     def grids_b64(self) -> List[str]:
@@ -189,9 +191,10 @@ def preprocess_video(
     grid_cols: int = DEFAULT_GRID_COLS,
     grid_rows: int = DEFAULT_GRID_ROWS,
     max_frames: Optional[int] = DEFAULT_MAX_FRAMES,
+    upload_mode: str = DEFAULT_UPLOAD_MODE,
     pruner: Optional[FramePruner] = None,
 ) -> PreprocessResult:
-    """Full pipeline: sample+downscale -> prune -> in-memory base64 grids."""
+    """Full pipeline: sample+downscale -> prune -> in-memory base64 grids or frames."""
     video_path = Path(video_path)
     if not video_path.is_file():
         raise PreprocessingError(f"Video file not found: {video_path}")
@@ -205,6 +208,7 @@ def preprocess_video(
         prune_threshold=prune_threshold,
         grid_cols=grid_cols,
         grid_rows=grid_rows,
+        upload_mode=upload_mode,
     )
 
     metadata, sampled = sample_and_downscale(
@@ -219,9 +223,15 @@ def preprocess_video(
     post_pruned = pruner.prune(sampled)
     sampled.clear()
     post_pruned_count = len(post_pruned)
-
-    grids = frames_to_grid_b64(post_pruned, cols=grid_cols, rows=grid_rows)
     timestamps = [f.timestamp for f in post_pruned]
+
+    if upload_mode == "frames":
+        frames_b64 = frames_to_b64_list(post_pruned)
+        grids: list[GridImage] = []
+    else:
+        frames_b64 = None
+        grids = frames_to_grid_b64(post_pruned, cols=grid_cols, rows=grid_rows)
+
     post_pruned.clear()
     gc.collect()
 
@@ -232,6 +242,8 @@ def preprocess_video(
         sampled_count=sampled_count,
         post_pruned_count=post_pruned_count,
         num_grids=len(grids),
+        num_frames=len(frames_b64 or []),
+        upload_mode=upload_mode,
     )
 
     return PreprocessResult(
@@ -242,6 +254,7 @@ def preprocess_video(
         post_pruned_count=post_pruned_count,
         grids=grids,
         frame_timestamps=timestamps,
+        frames_b64=frames_b64,
     )
 
 

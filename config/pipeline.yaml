@@ -4,10 +4,11 @@ input:
   skip_download: True
 
 output:
-  path: output/output.json
+  path: output/output48_frames_shop.json
 
 pipeline:
   strategy: smart
+  upload_mode: frames
   context_frames: 4
   fps: 1.0
   max_dim: 512
@@ -36,9 +37,15 @@ captions:
   timeout_seconds: 60
   styles:
     formal: {}
-    sarcastic: 
-      temperature: 0.6
+    sarcastic:
+      model: x-ai/grok-4.20
+      provider: openrouter
+      temperature: 0.4
     humorous_tech:
-      temperature: 0.6
+      model: x-ai/grok-4.20
+      provider: openrouter
+      temperature: 0.4
     humorous_non_tech:
-      temperature: 0.6
+      model: x-ai/grok-4.20
+      provider: openrouter
+      temperature: 0.4

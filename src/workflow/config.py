@@ -27,6 +27,7 @@ from workflow.async_pipeline import PipelineConfig
 CONTAINER_CONFIG_PATH = Path("/config/pipeline.yaml")
 
 DEFAULT_STRATEGY = "smart"
+DEFAULT_UPLOAD_MODE = "grid"
 DEFAULT_CONTEXT_FRAMES = 4
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -40,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "pipeline": {
         "strategy": DEFAULT_STRATEGY,
+        "upload_mode": DEFAULT_UPLOAD_MODE,
         "context_frames": DEFAULT_CONTEXT_FRAMES,
         "fps": DEFAULT_TARGET_FPS,
         "max_dim": DEFAULT_MAX_DIM,
@@ -100,6 +102,7 @@ class ModelStageConfig:
 @dataclass(frozen=True)
 class PipelineStageConfig:
     strategy: str
+    upload_mode: str
     context_frames: int
     fps: float
     max_dim: int
@@ -113,6 +116,7 @@ class PipelineStageConfig:
     def preprocess_kwargs(self) -> dict[str, Any]:
         return {
             "strategy": self.strategy,
+            "upload_mode": self.upload_mode,
             "context_frames": self.context_frames,
             "fps": self.fps,
             "max_dim": self.max_dim,
@@ -228,6 +232,16 @@ def _read_strategy(value: Any, field: str, section: str) -> str:
             f"{section}.{field} must be one of: {', '.join(sorted(allowed))}"
         )
     return strategy
+
+
+def _read_upload_mode(value: Any, field: str, section: str) -> str:
+    upload_mode = _read_str(value, field, section)
+    allowed = {"grid", "frames"}
+    if upload_mode not in allowed:
+        raise ConfigError(
+            f"{section}.{field} must be one of: {', '.join(sorted(allowed))}"
+        )
+    return upload_mode
 
 
 def _read_path(value: Any, field: str, section: str, base_dir: Path) -> Path:
@@ -404,6 +418,9 @@ def load_pipeline_config(path: Path, *, project_root: Path | None = None) -> App
         pipeline=PipelineStageConfig(
             strategy=_read_strategy(
                 pipeline_data.get("strategy"), "strategy", "pipeline"
+            ),
+            upload_mode=_read_upload_mode(
+                pipeline_data.get("upload_mode"), "upload_mode", "pipeline"
             ),
             context_frames=_read_int(
                 pipeline_data.get("context_frames"), "context_frames", "pipeline"

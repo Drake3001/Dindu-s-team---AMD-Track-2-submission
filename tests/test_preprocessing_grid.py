@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from preprocessing.types import Frame
-from preprocessing.vlm_output.grid import GridImage, frames_to_grid_b64
+from preprocessing.vlm_output.grid import GridImage, frames_to_b64_list, frames_to_grid_b64
 
 
 class GridImageTests(unittest.TestCase):
@@ -43,6 +43,20 @@ class GridImageTests(unittest.TestCase):
 
     def test_frames_to_grid_b64_empty_list(self) -> None:
         self.assertEqual(frames_to_grid_b64([]), [])
+
+    def test_frames_to_b64_list_encodes_each_frame(self) -> None:
+        frames = [
+            Frame(index=i, timestamp=float(i), image=np.zeros((16, 16, 3), dtype=np.uint8))
+            for i in range(3)
+        ]
+
+        encoded = frames_to_b64_list(frames)
+
+        self.assertEqual(len(encoded), 3)
+        self.assertTrue(all(frame_b64 for frame_b64 in encoded))
+
+    def test_frames_to_b64_list_empty_list(self) -> None:
+        self.assertEqual(frames_to_b64_list([]), [])
 
 
 if __name__ == "__main__":

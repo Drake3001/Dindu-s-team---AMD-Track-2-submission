@@ -9,7 +9,7 @@ import numpy as np
 from pipeline_2.grid_extractor.ffmpeg_reader import iter_frames, probe_metadata
 from pipeline_2.important_frames.detector import DetectorState
 from preprocessing.types import Frame, PreprocessingError, VideoMetadata
-from preprocessing.vlm_output.grid import frames_to_grid_b64
+from preprocessing.vlm_output.grid import frames_to_b64_list, frames_to_grid_b64
 
 
 def _effective_fps(fps: float, duration: float, frame_count: int) -> float:
@@ -37,10 +37,12 @@ def extract_smart_grids(
     max_dim: int = 512,
     grid_cols: int = 4,
     grid_rows: int = 4,
+    upload_mode: str = "grid",
 ) -> dict:
     """
     Extracts a prioritized list of important frames and background context frames
-    in a SINGLE pass, downscales them in-memory, and formats them into grids.
+    in a SINGLE pass, downscales them in-memory, and formats them into grids
+    or individual base64-encoded frames.
     """
     video_path = Path(video_path)
     if not video_path.is_file():
@@ -169,11 +171,22 @@ def extract_smart_grids(
     if not final_frames:
         raise PreprocessingError("No frames selected for grid.")
 
+    frame_timestamps = [f.timestamp for f in final_frames]
+    if upload_mode == "frames":
+        return {
+            "metadata": metadata,
+            "grids_b64": [],
+            "frames_b64": frames_to_b64_list(final_frames),
+            "frame_timestamps": frame_timestamps,
+            "sampled_count": len(final_frames),
+        }
+
     grids_b64 = frames_to_grid_b64(final_frames, cols=grid_cols, rows=grid_rows)
 
     return {
         "metadata": metadata,
         "grids_b64": grids_b64,
-        "frame_timestamps": [f.timestamp for f in final_frames],
+        "frames_b64": None,
+        "frame_timestamps": frame_timestamps,
         "sampled_count": len(final_frames),
     }

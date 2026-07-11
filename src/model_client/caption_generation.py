@@ -8,7 +8,11 @@ from model_client.response_parsing import format_json_for_prompt
 
 CAPTION_PROMPTS_DIR = Path(__file__).parent / "prompts" / "caption_generation"
 VIDEO_JSON_PLACEHOLDER = "[INSERT_VIDEO_JSON_HERE]"
-DEFAULT_CAPTION_SYSTEM_PROMPT = "You generate styled video captions from factual JSON input."
+DEFAULT_CAPTION_SYSTEM_PROMPT = (
+    "You generate styled video captions from factual JSON input. "
+    "Respond with one continuous plain-text paragraph only: no line breaks, "
+    "no JSON, no markdown, and no quotation marks around names or objects."
+)
 DEFAULT_CAPTION_TEMPERATURE = 0.7
 CREATIVE_CAPTION_TEMPERATURE = 1.0
 CREATIVE_CAPTION_STYLES = frozenset(

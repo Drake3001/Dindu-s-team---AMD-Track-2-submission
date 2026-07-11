@@ -13,6 +13,10 @@ from model_client.prompts import load_prompt
 from workflow.async_pipeline import run_workflow_tasks
 from workflow.config import AppConfig, ModelStageConfig, load_pipeline_config
 
+FRAME_PROMPT_MAP = {
+    "detailed_chronological": "detailed_chronological_frames",
+}
+
 log = structlog.get_logger(__name__)
 
 CONTAINER_INPUT_PATH = Path("/input/tasks.json")
@@ -121,10 +125,17 @@ def _create_stage_client(model_cfg) -> Any:
     )
 
 
+def _resolve_analysis_prompt(cfg: AppConfig):
+    prompt_name = cfg.vlm.prompt
+    if cfg.pipeline.upload_mode == "frames":
+        prompt_name = FRAME_PROMPT_MAP.get(prompt_name, prompt_name)
+    return load_prompt(prompt_name)
+
+
 async def _run_workflow(cfg: AppConfig, tasks: list[dict[str, Any]], project_root: Path) -> list[dict[str, Any]]:
     vlm_client = _create_stage_client(cfg.vlm.model)
     caption_clients = _build_caption_clients(cfg)
-    analysis_prompt = load_prompt(cfg.vlm.prompt)
+    analysis_prompt = _resolve_analysis_prompt(cfg)
 
     def on_error(task: dict[str, Any], error: Exception) -> dict[str, Any]:
         task_id = task.get("task_id", "unknown")

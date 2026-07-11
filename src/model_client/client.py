@@ -8,6 +8,7 @@ from model_client.messages import (
     DEFAULT_IMAGE_MIME_TYPE,
     build_frame_grids_messages,
     build_image_messages,
+    build_individual_frames_messages,
     build_text_messages,
 )
 from model_client.types import ModelRequestError, ModelResponseError
@@ -164,6 +165,32 @@ class ModelClient:
             timeout_seconds=timeout_seconds,
         )
 
+    def generate_from_individual_frames(
+        self,
+        frames_base64: list[str],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        frame_timestamps: list[float],
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from one or more individual base64-encoded frames."""
+        return self.chat(
+            build_individual_frames_messages(
+                frames_base64,
+                system_prompt,
+                user_prompt,
+                frame_timestamps=frame_timestamps,
+                image_mime_type=image_mime_type,
+            ),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
 
 class AsyncModelClient:
     """Async wrapper around the OpenAI SDK for configured model providers."""
@@ -259,6 +286,56 @@ class AsyncModelClient:
                 system_prompt,
                 user_prompt,
                 grids_meta=grids_meta,
+                image_mime_type=image_mime_type,
+            ),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def generate_from_images_base64(
+        self,
+        images_base64: list[str],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from a prompt and one or more base64-encoded images."""
+        return await self.chat(
+            build_image_messages(
+                images_base64,
+                system_prompt,
+                user_prompt,
+                image_mime_type=image_mime_type,
+            ),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def generate_from_individual_frames(
+        self,
+        frames_base64: list[str],
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        frame_timestamps: list[float],
+        image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """Generate text from one or more individual base64-encoded frames."""
+        return await self.chat(
+            build_individual_frames_messages(
+                frames_base64,
+                system_prompt,
+                user_prompt,
+                frame_timestamps=frame_timestamps,
                 image_mime_type=image_mime_type,
             ),
             temperature=temperature,

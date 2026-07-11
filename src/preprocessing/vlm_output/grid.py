@@ -28,6 +28,13 @@ def _encode_grid_b64(grid: np.ndarray, quality: int) -> str:
     return base64.b64encode(buf.tobytes()).decode("utf-8")
 
 
+def frames_to_b64_list(frames: list[Frame], quality: int = 85) -> list[str]:
+    """Encode each frame as an individual base64 JPEG, preserving chronological order."""
+    if not frames:
+        return []
+    return [_encode_grid_b64(frame.image, quality) for frame in frames]
+
+
 def _cell_size(frames: list[Frame]) -> tuple[int, int]:
     max_h = max(f.image.shape[0] for f in frames)
     max_w = max(f.image.shape[1] for f in frames)

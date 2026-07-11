@@ -63,6 +63,7 @@ def _preprocess_worker(args: tuple[str, str, dict[str, Any]]) -> dict[str, Any]:
     task_id, video_path, preprocess_kwargs = args
     kwargs = dict(preprocess_kwargs)
     strategy = kwargs.pop("strategy", "smart")
+    upload_mode = kwargs.pop("upload_mode", "grid")
 
     if strategy == "smart":
         result = extract_smart_grids(
@@ -72,55 +73,81 @@ def _preprocess_worker(args: tuple[str, str, dict[str, Any]]) -> dict[str, Any]:
             max_dim=kwargs.get("max_dim", 512),
             grid_cols=kwargs.get("grid_cols", 4),
             grid_rows=kwargs.get("grid_rows", 4),
+            upload_mode=upload_mode,
         )
         meta = result["metadata"]
-        grids = result["grids_b64"]
-        return {
-            "task_id": task_id,
-            "video_path": str(video_path),
-            "metadata": {
-                "duration_sec": meta.duration_sec,
-                "fps": meta.fps,
-                "frame_count": meta.frame_count,
-                "width": meta.width,
-                "height": meta.height,
-            },
-            "grids_b64": [grid.b64 for grid in grids],
-            "grids_meta": [
-                {
-                    "frame_count": grid.frame_count,
-                    "cols": grid.cols,
-                    "rows": grid.rows,
-                    "empty_cells": grid.empty_cells,
-                    "width_px": grid.width_px,
-                    "height_px": grid.height_px,
-                }
-                for grid in grids
-            ],
-            "sampled_count": result["sampled_count"],
-            "post_pruned_count": result["sampled_count"],
-            "frame_timestamps": result["frame_timestamps"],
-            "grids_count": len(grids),
-        }
+        return _build_preprocess_payload(
+            task_id=task_id,
+            video_path=str(video_path),
+            metadata=meta,
+            upload_mode=upload_mode,
+            grids=result.get("grids_b64") or [],
+            frames_b64=result.get("frames_b64"),
+            sampled_count=result["sampled_count"],
+            post_pruned_count=result["sampled_count"],
+            frame_timestamps=result["frame_timestamps"],
+        )
 
     result = preprocess_video(
         task_id=task_id,
         video_path=Path(video_path),
+        upload_mode=upload_mode,
         **kwargs,
     )
     meta = result.metadata
-    return {
+    return _build_preprocess_payload(
+        task_id=task_id,
+        video_path=str(video_path),
+        metadata=meta,
+        upload_mode=upload_mode,
+        grids=result.grids,
+        frames_b64=result.frames_b64,
+        sampled_count=result.sampled_count,
+        post_pruned_count=result.post_pruned_count,
+        frame_timestamps=result.frame_timestamps,
+    )
+
+
+def _build_preprocess_payload(
+    *,
+    task_id: str,
+    video_path: str,
+    metadata: Any,
+    upload_mode: str,
+    grids: list[Any],
+    frames_b64: list[str] | None,
+    sampled_count: int,
+    post_pruned_count: int,
+    frame_timestamps: list[float],
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "task_id": task_id,
-        "video_path": str(video_path),
+        "video_path": video_path,
         "metadata": {
-            "duration_sec": meta.duration_sec,
-            "fps": meta.fps,
-            "frame_count": meta.frame_count,
-            "width": meta.width,
-            "height": meta.height,
+            "duration_sec": metadata.duration_sec,
+            "fps": metadata.fps,
+            "frame_count": metadata.frame_count,
+            "width": metadata.width,
+            "height": metadata.height,
         },
-        "grids_b64": [grid.b64 for grid in result.grids],
-        "grids_meta": [
+        "upload_mode": upload_mode,
+        "sampled_count": sampled_count,
+        "post_pruned_count": post_pruned_count,
+        "frame_timestamps": frame_timestamps,
+    }
+
+    if upload_mode == "frames":
+        payload["frames_b64"] = frames_b64 or []
+        payload["frames_count"] = len(frames_b64 or [])
+        payload["grids_b64"] = []
+        payload["grids_meta"] = []
+        payload["grids_count"] = 0
+        return payload
+
+    grid_images = grids
+    if grid_images and hasattr(grid_images[0], "b64"):
+        payload["grids_b64"] = [grid.b64 for grid in grid_images]
+        payload["grids_meta"] = [
             {
                 "frame_count": grid.frame_count,
                 "cols": grid.cols,
@@ -129,13 +156,17 @@ def _preprocess_worker(args: tuple[str, str, dict[str, Any]]) -> dict[str, Any]:
                 "width_px": grid.width_px,
                 "height_px": grid.height_px,
             }
-            for grid in result.grids
-        ],
-        "sampled_count": result.sampled_count,
-        "post_pruned_count": result.post_pruned_count,
-        "frame_timestamps": result.frame_timestamps,
-        "grids_count": len(result.grids),
-    }
+            for grid in grid_images
+        ]
+        payload["grids_count"] = len(grid_images)
+    else:
+        payload["grids_b64"] = []
+        payload["grids_meta"] = []
+        payload["grids_count"] = 0
+
+    payload["frames_b64"] = []
+    payload["frames_count"] = 0
+    return payload
 
 
 async def _download_video(
@@ -203,16 +234,23 @@ async def run_workflow_task(
     )
     t2 = time.perf_counter()
 
-    grids_b64 = preprocessed["grids_b64"]
-    grids_meta = preprocessed["grids_meta"]
+    upload_mode = preprocessed.get("upload_mode", "grid")
 
     async with inference_sem:
-        vlm_response = await vlm_client.generate_from_frame_grids(
-            grids_b64,
-            analysis_prompt.system,
-            analysis_prompt.user,
-            grids_meta=grids_meta,
-        )
+        if upload_mode == "frames":
+            vlm_response = await vlm_client.generate_from_individual_frames(
+                preprocessed["frames_b64"],
+                analysis_prompt.system,
+                analysis_prompt.user,
+                frame_timestamps=preprocessed["frame_timestamps"],
+            )
+        else:
+            vlm_response = await vlm_client.generate_from_frame_grids(
+                preprocessed["grids_b64"],
+                analysis_prompt.system,
+                analysis_prompt.user,
+                grids_meta=preprocessed["grids_meta"],
+            )
     analysis = parse_json_from_model_response(vlm_response)
     t3 = time.perf_counter()
 

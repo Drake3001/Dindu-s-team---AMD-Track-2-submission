@@ -151,6 +151,43 @@ class AsyncPipelineTests(unittest.IsolatedAsyncioTestCase):
         vlm_client.generate_from_frame_grids.assert_awaited()
         caption_client.generate_from_frame_grids.assert_not_awaited()
 
+    @patch("workflow.async_pipeline.async_generate_caption")
+    @patch("workflow.async_pipeline._preprocess_video")
+    @patch("workflow.async_pipeline._download_video")
+    async def test_run_workflow_tasks_uses_individual_frames_when_configured(
+        self,
+        download_video: AsyncMock,
+        preprocess_video: AsyncMock,
+        async_generate_caption: AsyncMock,
+    ) -> None:
+        download_video.return_value = "videos/v1.mp4"
+        preprocess_video.return_value = _frames_preprocessed_payload("v1")
+        async_generate_caption.return_value = "caption-a"
+
+        vlm_client = AsyncMock()
+        vlm_client.generate_from_individual_frames = AsyncMock(return_value='{"ok": true}')
+        caption_clients = {"formal": AsyncMock()}
+
+        tasks = [
+            {"task_id": "v1", "video_url": "https://example.test/v1.mp4", "styles": ["formal"]},
+        ]
+
+        with patch("workflow.async_pipeline.ProcessPoolExecutor", return_value=MagicMock()):
+            results = await run_workflow_tasks(
+                tasks,
+                vlm_client=vlm_client,
+                caption_clients=caption_clients,
+                caption_params_for_style=lambda _style: {"temperature": None, "max_tokens": None, "timeout_seconds": None},
+                analysis_prompt=TEST_PROMPT,
+                videos_dir=Path("videos"),
+                styles_resolver=lambda task: task["styles"],
+                config=PipelineConfig(max_preprocess_workers=1),
+            )
+
+        self.assertEqual(results[0]["captions"]["formal"], "caption-a")
+        vlm_client.generate_from_individual_frames.assert_awaited_once()
+        vlm_client.generate_from_frame_grids.assert_not_awaited()
+
 
 def _preprocessed_payload(task_id: str) -> dict:
     return {
@@ -178,6 +215,32 @@ def _preprocessed_payload(task_id: str) -> dict:
         "post_pruned_count": 6,
         "frame_timestamps": [0.0],
         "grids_count": 1,
+        "upload_mode": "grid",
+        "frames_b64": [],
+        "frames_count": 0,
+    }
+
+
+def _frames_preprocessed_payload(task_id: str) -> dict:
+    return {
+        "task_id": task_id,
+        "video_path": f"videos/{task_id}.mp4",
+        "metadata": {
+            "duration_sec": 6.0,
+            "fps": 25.0,
+            "frame_count": 150,
+            "width": 1920,
+            "height": 1080,
+        },
+        "upload_mode": "frames",
+        "frames_b64": ["frame1", "frame2"],
+        "frames_count": 2,
+        "grids_b64": [],
+        "grids_meta": [],
+        "sampled_count": 2,
+        "post_pruned_count": 2,
+        "frame_timestamps": [0.0, 1.0],
+        "grids_count": 0,
     }
 
 

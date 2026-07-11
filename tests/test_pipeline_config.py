@@ -79,6 +79,7 @@ vlm:
 
         self.assertEqual(cfg.pipeline.fps, 0.5)
         self.assertEqual(cfg.pipeline.max_dim, 512)
+        self.assertEqual(cfg.pipeline.upload_mode, "grid")
         self.assertEqual(cfg.vlm.prompt, "structured_breakdown")
         self.assertIsNone(cfg.vlm.model.provider)
         self.assertIsNone(cfg.captions.styles)
@@ -169,6 +170,40 @@ captions:
         self.assertEqual(sarcastic.model, "accounts/fireworks/models/creative-caption")
         self.assertEqual(sarcastic.temperature, 1.0)
         self.assertEqual(cfg.captions.configured_styles(), ["formal", "sarcastic"])
+
+    def test_upload_mode_frames_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "pipeline.yaml"
+            config_path.write_text(
+                """
+pipeline:
+  upload_mode: frames
+vlm:
+  prompt: detailed_chronological_frames
+""",
+                encoding="utf-8",
+            )
+
+            cfg = load_pipeline_config(config_path, project_root=Path(tmpdir))
+
+        self.assertEqual(cfg.pipeline.upload_mode, "frames")
+        self.assertEqual(cfg.pipeline.preprocess_kwargs["upload_mode"], "frames")
+
+    def test_invalid_upload_mode_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "pipeline.yaml"
+            config_path.write_text(
+                """
+pipeline:
+  upload_mode: montage
+vlm:
+  prompt: detailed_chronological
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ConfigError, "upload_mode"):
+                load_pipeline_config(config_path, project_root=Path(tmpdir))
 
 
 if __name__ == "__main__":
