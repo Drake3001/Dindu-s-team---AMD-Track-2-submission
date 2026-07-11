@@ -1,10 +1,10 @@
 input:
-  tasks: input/test.json
+  tasks: input/tasks2.json
   videos_dir: videos
   skip_download: True
 
 output:
-  path: output/tasks.json
+  path: output/output.json
 
 pipeline:
   strategy: smart
@@ -14,7 +14,7 @@ pipeline:
   prune_threshold: 5.0
   grid_cols: 4
   grid_rows: 4
-  max_frames: 240
+  max_frames: 32
   concurrency:
     max_download_workers: 2
     max_preprocess_workers: null

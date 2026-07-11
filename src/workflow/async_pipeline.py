@@ -236,6 +236,8 @@ async def run_workflow_task(
     captions = dict(caption_pairs)
     t4 = time.perf_counter()
 
+    key_seconds = sorted(round(float(t), 1) for t in preprocessed.get("frame_timestamps", []))
+
     log.info(
         "workflow_task_complete",
         task_id=task_id,
@@ -244,6 +246,8 @@ async def run_workflow_task(
         vlm_s=round(t3 - t2, 4),
         captions_s=round(t4 - t3, 4),
         total_s=round(t4 - t0, 4),
+        key_seconds=key_seconds,
+        key_frame_count=len(key_seconds),
     )
 
     return {"task_id": task_id, "captions": captions}

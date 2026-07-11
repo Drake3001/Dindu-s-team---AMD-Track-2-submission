@@ -1,10 +1,10 @@
-# Burner image config: same models as pipeline.yaml, routed via OpenRouter.
+# Burner image config: mirrors pipeline.yaml parameters, routed via OpenRouter.
 # API key is baked into the burner image at build time (see Dockerfile.burner).
 
 input:
   tasks: input/test.json
   videos_dir: videos
-  skip_download: false
+  skip_download: False
 
 output:
   path: output/tasks.json
@@ -17,7 +17,7 @@ pipeline:
   prune_threshold: 5.0
   grid_cols: 4
   grid_rows: 4
-  max_frames: 240
+  max_frames: 32
   concurrency:
     max_download_workers: 2
     max_preprocess_workers: null

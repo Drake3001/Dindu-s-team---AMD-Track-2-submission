@@ -3,5 +3,15 @@
         "task_id": "v5",
         "video_url": "https://storage.googleapis.com/amd-hackathon-clips/1860079-uhd_2560_1440_25fps.mp4", 
         "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+    },
+    {
+        "task_id": "v6",
+        "video_url": "https://storage.googleapis.com/amd-hackathon-clips/1860079-uhd_2560_1440_25fps.mp4", 
+        "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
+    },
+    {
+        "task_id": "v7",
+        "video_url": "https://storage.googleapis.com/amd-hackathon-clips/1860079-uhd_2560_1440_25fps.mp4", 
+        "styles": ["formal", "sarcastic", "humorous_tech", "humorous_non_tech"]
     }
 ]
