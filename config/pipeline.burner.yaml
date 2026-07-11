@@ -1,7 +1,10 @@
+# Burner image config: same models as pipeline.yaml, routed via OpenRouter.
+# API key is baked into the burner image at build time (see Dockerfile.burner).
+
 input:
   tasks: input/test.json
   videos_dir: videos
-  skip_download: False
+  skip_download: false
 
 output:
   path: output/tasks.json
@@ -19,22 +22,22 @@ pipeline:
     max_inference_workers: 3
 
 vlm:
-  provider: fireworks
-  model: accounts/fireworks/models/qwen3p7-plus
+  provider: openrouter
+  model: qwen/qwen3.7-plus
   temperature: 0.0
   max_tokens: 8192
   timeout_seconds: 60
   prompt: detailed_chronological
 
 captions:
-  provider: fireworks
-  model: accounts/fireworks/models/deepseek-v4-pro
+  provider: openrouter
+  model: deepseek/deepseek-v4-pro
   temperature: 0.2
   max_tokens: 2048
   timeout_seconds: 60
   styles:
     formal: {}
-    sarcastic: 
+    sarcastic:
       temperature: 0.6
     humorous_tech:
       temperature: 0.6

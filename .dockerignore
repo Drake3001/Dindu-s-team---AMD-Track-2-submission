@@ -1,0 +1,16 @@
+.git
+.venv
+credentials/
+videos/
+output/
+input/
+tests/
+test_videos_tmp/
+*.mp4
+__pycache__/
+*.py[cod]
+*.egg-info/
+.python-version
+README.md
+SCRIPT_README.md
+test_suite.txt
