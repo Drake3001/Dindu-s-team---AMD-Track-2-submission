@@ -175,7 +175,7 @@ class ModelClientBenchTests(unittest.TestCase):
         process_task_mock.side_effect = ModelRequestError("model failed")
         write_report.return_value = Path("output/vlm_output/bench_test.json")
 
-        main(runs=1)
+        main(runs=1, sequential=True)
 
         report = write_report.call_args.args[1]
         task = report["tasks"][0]
@@ -213,7 +213,7 @@ class ModelClientBenchTests(unittest.TestCase):
         ]
         write_report.return_value = Path("output/vlm_output/bench_test.json")
 
-        main(runs=1)
+        main(runs=1, sequential=True)
 
         report = write_report.call_args.args[1]
         tasks = report["tasks"]
@@ -221,6 +221,43 @@ class ModelClientBenchTests(unittest.TestCase):
         self.assertEqual(tasks[0]["status"], "ok")
         self.assertEqual(tasks[1]["status"], "failed")
         self.assertIn("model failed", tasks[1]["error"])
+
+    @patch("model_client.bench.load_prompts")
+    @patch("model_client.bench._write_report")
+    @patch("model_client.bench.asyncio.run")
+    @patch("model_client.bench._run_parallel_bench")
+    @patch("model_client.bench.create_model_client")
+    @patch("model_client.bench.load_input")
+    def test_main_uses_parallel_path_by_default(
+        self,
+        load_input: Mock,
+        create_model_client: Mock,
+        run_parallel_bench: Mock,
+        asyncio_run: Mock,
+        write_report: Mock,
+        load_prompts: Mock,
+    ) -> None:
+        load_input.return_value = [
+            {"task_id": "v1", "video_url": "https://example.test/v1.mp4"},
+        ]
+        load_prompts.return_value = [TEST_PROMPT]
+        create_model_client.return_value = _model_client([])
+        asyncio_run.side_effect = lambda _coro: [
+            {
+                "task_id": "v1",
+                "status": "ok",
+                "timings_s": {"total": 1.0},
+                "counts": {"grids": 1, "model_requests": 1},
+            }
+        ]
+        write_report.return_value = Path("output/vlm_output/bench_test.json")
+
+        main(runs=1)
+
+        asyncio_run.assert_called_once()
+        report = write_report.call_args.args[1]
+        self.assertFalse(report["params"]["sequential"])
+        self.assertIn("parallelism", report["params"])
 
 
 def _model_client(responses: list[str]) -> Mock:

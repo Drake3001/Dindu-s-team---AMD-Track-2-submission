@@ -1,5 +1,6 @@
 from model_client.api import (
     chat,
+    create_async_model_client,
     create_model_client,
     generate_from_frame_grids,
     generate_from_image_base64,
@@ -7,6 +8,7 @@ from model_client.api import (
     generate_text,
 )
 from model_client.caption_generation import (
+    async_generate_caption,
     build_caption_prompt,
     caption_temperature_for_style,
     generate_caption,
@@ -19,9 +21,11 @@ from model_client.response_parsing import (
 )
 
 __all__ = [
+    "async_generate_caption",
     "build_caption_prompt",
     "caption_temperature_for_style",
     "chat",
+    "create_async_model_client",
     "create_model_client",
     "format_json_for_prompt",
     "generate_caption",

@@ -1,0 +1,38 @@
+# Burner image: bakes a rate-limited OpenRouter API key at build time so judges
+# can run without passing -e. Do NOT use for your main public submission image.
+#
+# Build (linux/amd64):
+#   docker build -f Dockerfile.burner --platform linux/amd64 \
+#     --build-arg OPENROUTER_API_KEY="$(grep '^OPENROUTER_API_KEY=' credentials/.burner.env | cut -d= -f2-)" \
+#     -t ghcr.io/dindu/amd-track2:burner .
+#
+# PowerShell:
+#   $key = (Get-Content credentials\.burner.env | Where-Object { $_ -match '^OPENROUTER_API_KEY=' }) -replace '^OPENROUTER_API_KEY=',''
+#   docker build -f Dockerfile.burner --platform linux/amd64 --build-arg OPENROUTER_API_KEY=$key -t ghcr.io/dindu/amd-track2:burner .
+
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev
+
+COPY src/ ./src/
+# Burner config uses OpenRouter model IDs; copied as pipeline.yaml for main.py default.
+COPY config/pipeline.burner.yaml ./config/pipeline.yaml
+
+ARG OPENROUTER_API_KEY
+ENV OPENROUTER_API_KEY=${OPENROUTER_API_KEY} \
+    MODEL_PROVIDER=openrouter \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
+    PYTHONUNBUFFERED=1
+
+CMD ["python", "src/main.py"]

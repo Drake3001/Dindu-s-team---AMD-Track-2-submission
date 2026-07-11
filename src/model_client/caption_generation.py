@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from model_client.client import ModelClient
+from model_client.client import AsyncModelClient, ModelClient
 from model_client.response_parsing import format_json_for_prompt
 
 CAPTION_PROMPTS_DIR = Path(__file__).parent / "prompts" / "caption_generation"
@@ -65,6 +65,27 @@ def generate_caption(
 ) -> str:
     """Generate a styled caption from parsed VLM JSON."""
     return model_client.generate_text(
+        DEFAULT_CAPTION_SYSTEM_PROMPT,
+        build_caption_prompt(style, video_analysis),
+        temperature=temperature
+        if temperature is not None
+        else caption_temperature_for_style(style),
+        max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def async_generate_caption(
+    model_client: AsyncModelClient,
+    video_analysis: Any,
+    style: str,
+    *,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+) -> str:
+    """Generate a styled caption from parsed VLM JSON asynchronously."""
+    return await model_client.generate_text(
         DEFAULT_CAPTION_SYSTEM_PROMPT,
         build_caption_prompt(style, video_analysis),
         temperature=temperature
