@@ -22,7 +22,7 @@ import numpy as np
 import structlog
 
 from .pruning_strat import AbsDiffPruner, FramePruner
-from .vlm_output import frames_to_grid_b64
+from .vlm_output import GridImage, frames_to_grid_b64
 
 log = structlog.get_logger(__name__)
 
@@ -43,8 +43,12 @@ class PreprocessResult:
     metadata: VideoMetadata
     sampled_count: int
     post_pruned_count: int
-    grids_b64: List[str]
+    grids: List[GridImage]
     frame_timestamps: List[float]
+
+    @property
+    def grids_b64(self) -> List[str]:
+        return [grid.b64 for grid in self.grids]
 
 
 # --------------------------------------------------------------------------
@@ -216,7 +220,7 @@ def preprocess_video(
     sampled.clear()
     post_pruned_count = len(post_pruned)
 
-    grids_b64 = frames_to_grid_b64(post_pruned, cols=grid_cols, rows=grid_rows)
+    grids = frames_to_grid_b64(post_pruned, cols=grid_cols, rows=grid_rows)
     timestamps = [f.timestamp for f in post_pruned]
     post_pruned.clear()
     gc.collect()
@@ -227,7 +231,7 @@ def preprocess_video(
         duration_sec=metadata.duration_sec,
         sampled_count=sampled_count,
         post_pruned_count=post_pruned_count,
-        num_grids=len(grids_b64),
+        num_grids=len(grids),
     )
 
     return PreprocessResult(
@@ -236,7 +240,7 @@ def preprocess_video(
         metadata=metadata,
         sampled_count=sampled_count,
         post_pruned_count=post_pruned_count,
-        grids_b64=grids_b64,
+        grids=grids,
         frame_timestamps=timestamps,
     )
 

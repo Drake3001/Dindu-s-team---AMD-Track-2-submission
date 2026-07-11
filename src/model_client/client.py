@@ -6,7 +6,7 @@ import structlog
 from model_client.config import ModelConfig
 from model_client.messages import (
     DEFAULT_IMAGE_MIME_TYPE,
-    build_frame_grid_messages,
+    build_frame_grids_messages,
     build_image_messages,
     build_text_messages,
 )
@@ -135,23 +135,25 @@ class ModelClient:
             timeout_seconds=timeout_seconds,
         )
 
-    def generate_from_frame_grid_base64(
+    def generate_from_frame_grids(
         self,
-        frame_grid_base64: str,
+        grids_base64: list[str],
         system_prompt: str,
         user_prompt: str,
         *,
+        grids_meta: list[dict[str, int]],
         image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
         temperature: float | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
     ) -> str:
-        """Generate text from one base64 image containing a grid of video frames."""
+        """Generate text from one or more base64 grid images in a single message."""
         return self.chat(
-            build_frame_grid_messages(
-                frame_grid_base64,
+            build_frame_grids_messages(
+                grids_base64,
                 system_prompt,
                 user_prompt,
+                grids_meta=grids_meta,
                 image_mime_type=image_mime_type,
             ),
             temperature=temperature,

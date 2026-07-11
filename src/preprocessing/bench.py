@@ -219,7 +219,7 @@ def main(
                     grid_rows,
                     max_frames,
                 )
-            except (PreprocessingError, KeyError, FileNotFoundError) as exc:
+            except (PreprocessingError, KeyError, FileNotFoundError, OSError) as exc:
                 result = {
                     "task_id": task.get("task_id", "unknown"),
                     "video_url": task.get("video_url"),

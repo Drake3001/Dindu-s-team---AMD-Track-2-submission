@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
 from preprocessing.types import Frame, PreprocessingError
+
+
+@dataclass(frozen=True)
+class GridImage:
+    b64: str
+    frame_count: int
+    capacity: int
+    empty_cells: int
+    cols: int
+    rows: int
+    width_px: int
+    height_px: int
 
 
 def _encode_grid_b64(grid: np.ndarray, quality: int) -> str:
@@ -55,19 +68,32 @@ def frames_to_grid_b64(
     cols: int = 4,
     rows: int = 4,
     quality: int = 85,
-) -> list[str]:
-    """Tile frames into one or more grid montages and return base64 JPEG strings."""
+) -> list[GridImage]:
+    """Tile frames into one or more grid montages and return base64 JPEG metadata."""
     if not frames:
         return []
     if cols <= 0 or rows <= 0:
         raise PreprocessingError("grid cols and rows must be positive")
 
     capacity = cols * rows
-    grids: list[str] = []
+    grids: list[GridImage] = []
 
     for start in range(0, len(frames), capacity):
         chunk = frames[start : start + capacity]
         grid = _build_grid(chunk, cols, rows)
-        grids.append(_encode_grid_b64(grid, quality))
+        height_px, width_px = grid.shape[:2]
+        frame_count = len(chunk)
+        grids.append(
+            GridImage(
+                b64=_encode_grid_b64(grid, quality),
+                frame_count=frame_count,
+                capacity=capacity,
+                empty_cells=capacity - frame_count,
+                cols=cols,
+                rows=rows,
+                width_px=width_px,
+                height_px=height_px,
+            )
+        )
 
     return grids

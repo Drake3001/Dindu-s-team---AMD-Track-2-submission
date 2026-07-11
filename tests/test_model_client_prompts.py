@@ -14,7 +14,9 @@ class PromptLoaderTests(unittest.TestCase):
         prompt = load_prompt("concise_factual")
         self.assertEqual(prompt.name, "concise_factual")
         self.assertIn("video analyst", prompt.system.lower())
+        self.assertIn("json", prompt.system.lower())
         self.assertIn("factual", prompt.user.lower())
+        self.assertIn("setting", prompt.user.lower())
 
     def test_load_prompts_defaults_to_all(self) -> None:
         prompts = load_prompts()

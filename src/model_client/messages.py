@@ -3,10 +3,26 @@ from typing import Any
 from model_client.types import ModelRequestError
 
 DEFAULT_IMAGE_MIME_TYPE = "image/jpeg"
-FRAME_GRID_PROMPT_PREFIX = (
-    "The attached image is a grid of video frames ordered left-to-right, "
-    "top-to-bottom. Analyze it as a temporal sequence.\n\n"
-)
+
+
+def build_frame_grids_context(grids_meta: list[dict[str, int]], *, image_count: int) -> str:
+    lines = [
+        f"You are given {image_count} base64-encoded JPEG image(s), in chronological order "
+        "(image 1 first). Together they cover one video.",
+    ]
+    for index, meta in enumerate(grids_meta, start=1):
+        lines.append(
+            f"Image {index}: {meta['frame_count']} frame(s) in a "
+            f"{meta['rows']}x{meta['cols']} grid ({meta['width_px']}x{meta['height_px']} px), "
+            f"{meta['empty_cells']} empty cell(s) filled solid black."
+        )
+    lines.append(
+        "Each image tiles frames left-to-right then top-to-bottom in chronological order. "
+        "Individual frames may also carry black letterbox bars to preserve aspect ratio. "
+        "Treat any all-black cell or black bar as padding, not as video content, and never "
+        "describe it."
+    )
+    return "\n".join(lines) + "\n\n"
 
 
 def build_text_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
@@ -43,17 +59,24 @@ def build_image_messages(
     ]
 
 
-def build_frame_grid_messages(
-    frame_grid_base64: str,
+def build_frame_grids_messages(
+    grids_base64: list[str],
     system_prompt: str,
     user_prompt: str,
     *,
+    grids_meta: list[dict[str, int]],
     image_mime_type: str = DEFAULT_IMAGE_MIME_TYPE,
 ) -> list[dict[str, Any]]:
+    if len(grids_base64) != len(grids_meta):
+        raise ModelRequestError("grids_base64 and grids_meta must have the same length")
+    if not grids_base64:
+        raise ModelRequestError("grids_base64 must contain at least one image")
+
+    context = build_frame_grids_context(grids_meta, image_count=len(grids_base64))
     return build_image_messages(
-        [frame_grid_base64],
+        grids_base64,
         system_prompt,
-        f"{FRAME_GRID_PROMPT_PREFIX}{user_prompt}",
+        f"{context}{user_prompt}",
         image_mime_type=image_mime_type,
     )
 
