@@ -14,6 +14,7 @@ class Frame:
     index: int            # position within the sampled sequence
     timestamp: float      # seconds into the source video
     image: np.ndarray     # BGR ndarray (opencv convention)
+    score: float = 0.0    # action intensity score from the detector
 
 
 @dataclass
